@@ -26,12 +26,14 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 # Set source files
 set(SOURCES
     src/core/config.cpp
+    src/core/kanacore.cpp
     src/frontends/sdl/main.cpp
 )
 
 # Set header files
 set(HEADERS
     include/core/config.hpp
+    include/core/kanacore.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
