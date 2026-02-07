@@ -14,6 +14,9 @@ endif()
 
 project(KanaStation CXX)
 
+# Add subdirectories
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/spdlog)
+
 # Enable assertions in RelWithDebInfo builds
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
@@ -32,3 +35,5 @@ set(HEADERS
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+
+target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
