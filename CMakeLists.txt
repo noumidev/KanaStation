@@ -22,10 +22,13 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # Set source files
 set(SOURCES
+    src/core/config.cpp
     src/frontends/sdl/main.cpp
 )
 
 # Set header files
-set(HEADERS)
+set(HEADERS
+    include/core/config.hpp
+)
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
