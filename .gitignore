@@ -1,0 +1,10 @@
+# VS Code
+.cache
+.vscode
+
+# Build dirs
+build
+out
+
+# macOS
+.DS_Store
