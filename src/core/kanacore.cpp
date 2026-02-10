@@ -13,9 +13,17 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <common/types.hpp>
+#include <core/hw/boot_rom.hpp>
+#include <core/hw/bus.hpp>
+#include <core/hw/allegrex/allegrex.hpp>
+#include <core/hw/allegrex/interpreter.hpp>
+
 namespace kanacore {
 
 static std::shared_ptr<spdlog::logger> logger;
+
+static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
 
 void initialize(const Configuration config) {
     static bool IS_INITIALIZED = false;
@@ -33,23 +41,49 @@ void initialize(const Configuration config) {
         exit(1);
     }
 
+    hw::bus::initialize();
+    hw::boot_rom::initialize(config.boot_path);
+    hw::allegrex::interpreter::initialize();
+
+    // Set up system core memory handlers
+    sc.read8   = hw::bus::read<common::u8>;
+    sc.read16  = hw::bus::read<common::u16>;
+    sc.read32  = hw::bus::read<common::u32>;
+    sc.write8  = hw::bus::write<common::u8>;
+    sc.write16 = hw::bus::write<common::u16>;
+    sc.write32 = hw::bus::write<common::u32>;
+
     IS_INITIALIZED = true;
 }
 
 void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
+    hw::bus::soft_reset();
+    hw::boot_rom::soft_reset();
+    hw::allegrex::interpreter::soft_reset();
 }
 
 void hard_reset() {
     // This should hard reset all components (including memory)
+    hw::bus::hard_reset();
+    hw::boot_rom::hard_reset();
+    hw::allegrex::interpreter::hard_reset();
+
+    sc.hard_reset();
 }
 
 void shutdown() {
     // This shuts down all components
+    hw::bus::shutdown();
+    hw::boot_rom::shutdown();
+    hw::allegrex::interpreter::shutdown();
 }
 
 void run() {
-    // This runs all components
+    // This will be set by a scheduler later on
+    *sc.get_cycles() = 128;
+
+    hw::allegrex::interpreter::run(&sc);
 }
 
 };
