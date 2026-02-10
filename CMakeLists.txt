@@ -27,6 +27,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(SOURCES
     src/core/config.cpp
     src/core/kanacore.cpp
+    src/core/hw/boot_rom.cpp
     src/core/hw/bus.cpp
     src/frontends/sdl/main.cpp
 )
@@ -36,6 +37,7 @@ set(HEADERS
     include/common/types.hpp
     include/core/config.hpp
     include/core/kanacore.hpp
+    include/core/hw/boot_rom.hpp
     include/core/hw/bus.hpp
 )
 
