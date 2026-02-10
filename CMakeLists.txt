@@ -27,6 +27,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 set(SOURCES
     src/core/config.cpp
     src/core/kanacore.cpp
+    src/core/hw/bus.cpp
     src/frontends/sdl/main.cpp
 )
 
@@ -35,6 +36,7 @@ set(HEADERS
     include/common/types.hpp
     include/core/config.hpp
     include/core/kanacore.hpp
+    include/core/hw/bus.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
