@@ -32,6 +32,7 @@ set(SOURCES
 
 # Set header files
 set(HEADERS
+    include/common/types.hpp
     include/core/config.hpp
     include/core/kanacore.hpp
 )
