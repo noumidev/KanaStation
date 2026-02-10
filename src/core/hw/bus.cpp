@@ -53,7 +53,7 @@ void run() {
 template<>
 u8 read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("read8 address out of bounds {:08X}");
+        logger->error("read8 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
@@ -70,7 +70,7 @@ u8 read(const u32 addr) {
 template<>
 u16 read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("read16 address out of bounds {:08X}");
+        logger->error("read16 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
@@ -87,7 +87,7 @@ u16 read(const u32 addr) {
 template<>
 u32 read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("read32 address out of bounds {:08X}");
+        logger->error("read32 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
@@ -104,7 +104,7 @@ u32 read(const u32 addr) {
 template<>
 void write(const u32 addr, const u8 data) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("write8 address out of bounds {:08X}");
+        logger->error("write8 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
@@ -121,7 +121,7 @@ void write(const u32 addr, const u8 data) {
 template<>
 void write(const u32 addr, const u16 data) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("write16 address out of bounds {:08X}");
+        logger->error("write16 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
@@ -138,7 +138,7 @@ void write(const u32 addr, const u16 data) {
 template<>
 void write(const u32 addr, const u32 data) {
     if (addr >= ADDRESS_SPACE) {
-        logger->error("write32 address out of bounds {:08X}");
+        logger->error("write32 address out of bounds ({:08X})", addr);
         exit(1);
     }
 
