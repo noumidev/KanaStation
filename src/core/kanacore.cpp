@@ -18,6 +18,7 @@
 #include <core/hw/bus.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
+#include <core/hw/allegrex/scratchpad.hpp>
 
 namespace kanacore {
 
@@ -44,6 +45,7 @@ void initialize(const Configuration config) {
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::allegrex::interpreter::initialize();
+    hw::allegrex::scratchpad::initialize();
 
     // Set up system core memory handlers
     sc.read8   = hw::bus::read<common::u8>;
@@ -61,6 +63,7 @@ void soft_reset() {
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
     hw::allegrex::interpreter::soft_reset();
+    hw::allegrex::scratchpad::soft_reset();
 }
 
 void hard_reset() {
@@ -68,6 +71,7 @@ void hard_reset() {
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
     hw::allegrex::interpreter::hard_reset();
+    hw::allegrex::scratchpad::hard_reset();
 
     sc.hard_reset();
 }
@@ -77,13 +81,16 @@ void shutdown() {
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
     hw::allegrex::interpreter::shutdown();
+    hw::allegrex::scratchpad::shutdown();
 }
 
 void run() {
-    // This will be set by a scheduler later on
-    *sc.get_cycles() = 128;
+    while (true) {
+        // This will be set by a scheduler later on
+        *sc.get_cycles() = 128;
 
-    hw::allegrex::interpreter::run(&sc);
+        hw::allegrex::interpreter::run(&sc);
+    }
 }
 
 };
