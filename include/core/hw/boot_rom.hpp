@@ -7,8 +7,6 @@
 
 #pragma once
 
-#include <common/types.hpp>
-
 namespace kanacore::hw::boot_rom {
 
 void initialize(const char* boot_path);
