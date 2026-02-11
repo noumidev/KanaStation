@@ -7,6 +7,8 @@
 
 #include <core/hw/allegrex/allegrex.hpp>
 
+#include <cassert>
+#include <cstdlib>
 #include <type_traits>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -77,8 +79,37 @@ void Allegrex::soft_reset() {
 
 void Allegrex::hard_reset() {
     regfile = RegisterFile{};
+    cp0 = Cp0{};
 
     jump(BOOT_EXCEPTION_ADDR);
+}
+
+void Allegrex::dump_state() {
+    constexpr const char *REGISTER_NAMES[34] = {
+        "$r0", "$at", "$v0", "$v1", "$a0", "$a1", "$a2", "$a3",
+        "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
+        "$s0", "$s1", "$s2", "$s3", "$s4", "$s5", "$s6", "$s7",
+        "$t8", "$t9", "$k0", "$k1", "$gp", "$sp", "$s8", "$ra",
+        "$lo", "$hi",
+    };
+
+    for (u64 i = 0; i < RegisterFile::NUM_GPRS; i += 4) {
+        if (i < 32) {
+            logger->info(
+            "{}: {:08X}  {}: {:08X}  {}: {:08X}  {}: {:08X}",
+                REGISTER_NAMES[i + 0], get_reg(i + 0),
+                REGISTER_NAMES[i + 1], get_reg(i + 1),
+                REGISTER_NAMES[i + 2], get_reg(i + 2),
+                REGISTER_NAMES[i + 3], get_reg(i + 3)
+            );
+        } else {
+            logger->info(
+            "{}: {:08X}  {}: {:08X}",
+                REGISTER_NAMES[i + 0], get_reg(i + 0),
+                REGISTER_NAMES[i + 1], get_reg(i + 1)
+            );
+        }
+    }
 }
 
 bool Allegrex::in_delay_slot() const {
@@ -89,12 +120,89 @@ bool Allegrex::in_delay_slot() const {
 }
 
 void Allegrex::jump(const u32 target) {
+    logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
+
     regfile.pc = target;
     regfile.next_pc = target + sizeof(u32);
 }
 
 void Allegrex::delayed_jump(const u32 target) {
+    logger->debug("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
+
     regfile.next_pc = target;
+}
+
+template<bool is_branch_likely>
+void Allegrex::branch(const u32 target, const bool condition, const u32 link_idx) {
+    assert(link_idx < RegisterFile::NUM_GPRS);
+
+    if (in_delay_slot()) {
+        logger->error("Branch in delay slot");
+        exit(1);
+    }
+
+    set_reg(link_idx, regfile.next_pc);
+
+    if (condition) {
+        delayed_jump(target);
+    } else if constexpr (is_branch_likely) {
+        // Skip the instruction in the delay slot
+        jump(regfile.next_pc);
+    }
+}
+
+template void Allegrex::branch<false>(const u32, const bool, const u32);
+template void Allegrex::branch<true >(const u32, const bool, const u32);
+
+u32 Allegrex::get_reg(const u32 idx) const {
+    assert(idx < RegisterFile::NUM_GPRS);
+
+    return regfile.gprs[idx];
+}
+
+void Allegrex::set_reg(const u32 idx, const u32 data) {
+    assert(idx < RegisterFile::NUM_GPRS);
+
+    regfile.gprs[idx] = data;
+    regfile.gprs[0]   = 0;
+}
+
+u32 Allegrex::get_pc() const {
+    return regfile.pc;
+}
+
+void Allegrex::set_control_reg(const u32 idx, const u32 data) {
+    assert(idx < Cp0::NUM_REGS);
+
+    cp0.control_regs[idx] = data;
+}
+
+u32 Allegrex::get_status_reg(const u32 idx) const {
+    assert(idx < Cp0::NUM_REGS);
+
+    u32 data;
+
+    switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_CONFIG:
+            data = Cp0::CONFIG;
+            break;
+        default:
+            logger->warn("Unimplemented read from CP0 status register {}", Cp0::STATUS_REGISTER_NAMES[idx]);
+            return 0;
+    }
+
+    logger->debug("Read from CP0 status register {}", Cp0::STATUS_REGISTER_NAMES[idx]);
+    return data;
+}
+
+void Allegrex::set_status_reg(const u32 idx, const u32 data) {
+    assert(idx < Cp0::NUM_REGS);
+
+    switch (idx) {
+        default:
+            logger->warn("Unimplemented write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
+            break;
+    }
 }
 
 u32 Allegrex::fetch_instr() {
