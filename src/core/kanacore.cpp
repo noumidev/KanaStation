@@ -16,6 +16,7 @@
 #include <common/types.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/edram.hpp>
 #include <core/hw/kirk.hpp>
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
@@ -52,6 +53,7 @@ void initialize(const Configuration config) {
 
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
+    hw::edram::initialize();
     hw::kirk::initialize();
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
@@ -73,6 +75,7 @@ void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
+    hw::edram::soft_reset();
     hw::kirk::soft_reset();
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
@@ -86,6 +89,7 @@ void hard_reset() {
     // This should hard reset all components (including memory)
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
+    hw::edram::hard_reset();
     hw::kirk::hard_reset();
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
@@ -99,6 +103,7 @@ void shutdown() {
     // This shuts down all components
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
+    hw::edram::shutdown();
     hw::kirk::shutdown();
     hw::nand::shutdown();
     hw::shared_ram::shutdown();
