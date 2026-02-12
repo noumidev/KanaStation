@@ -5,7 +5,6 @@
 
 /* core/hw/allegrex/interpreter.cpp - ALLEGREX interpreter */
 
-#include "core/hw/allegrex/allegrex.hpp"
 #include <core/hw/allegrex/interpreter.hpp>
 
 #include <array>
@@ -14,7 +13,7 @@
 #include <common/types.hpp>
 
 #define OPCODE ((instr >> 26) & 0x3F)
-#define FUNCT  ((instr >>  0) & 0x7F) // Intentionally 7-bit to help with decoding
+#define FUNCT  ((instr >>  0) & 0x3F)
 #define RS     ((instr >> 21) & 0x1F)
 #define RT     ((instr >> 16) & 0x1F)
 #define RD     ((instr >> 11) & 0x1F)
@@ -31,14 +30,16 @@ using namespace common;
 using Instruction = i64 (*)(Allegrex*, const u32);
 
 constexpr u64 PRIMARY_TABLE_SIZE = 0x40;
-constexpr u64 SPECIAL_TABLE_SIZE = 0x80;
+constexpr u64 SPECIAL_TABLE_SIZE = 0x40;
 
 enum Opcode {
     OPCODE_SPECIAL  = 0x00,
     OPCODE_JAL      = 0x03,
+    OPCODE_BEQ      = 0x04,
     OPCODE_BNE      = 0x05,
     OPCODE_BGTZ     = 0x07,
     OPCODE_ADDIU    = 0x09,
+    OPCODE_ANDI     = 0x0C,
     OPCODE_ORI      = 0x0D,
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
@@ -50,10 +51,16 @@ enum Opcode {
 
 enum SpecialOpcode {
     SPECIAL_OPCODE_SLL  = 0x00,
+    SPECIAL_OPCODE_SRL  = 0x02,
     SPECIAL_OPCODE_SLLV = 0x04,
     SPECIAL_OPCODE_JR   = 0x08,
+    SPECIAL_OPCODE_JALR = 0x09,
     SPECIAL_OPCODE_SYNC = 0x0F,
     SPECIAL_OPCODE_ADDU = 0x21,
+    SPECIAL_OPCODE_AND  = 0x24,
+    SPECIAL_OPCODE_OR   = 0x25,
+    SPECIAL_OPCODE_XOR  = 0x26,
+    SPECIAL_OPCODE_NOR  = 0x27,
 };
 
 enum Special3Opcode {
@@ -80,6 +87,21 @@ static i64 i_addiu(Allegrex* cpu, const u32 instr) {
 
 static i64 i_addu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RS) + cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_and(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RS) & cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_andi(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->get_reg(RS) & UIMM);
+    return 1;
+}
+
+static i64 i_beq(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) == cpu->get_reg(RT), 0);
     return 1;
 }
 
@@ -117,6 +139,11 @@ static i64 i_ext(Allegrex* cpu, const u32 instr) {
 
 static i64 i_jal(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>((cpu->get_pc() & 0xF0000000) + (TARGET << 2), true, 31);
+    return 1;
+}
+
+static i64 i_jalr(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_reg(RS), true, RD);
     return 1;
 }
 
@@ -163,6 +190,16 @@ static i64 i_mtc(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_nor(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, ~(cpu->get_reg(RS) | cpu->get_reg(RT)));
+    return 1;
+}
+
+static i64 i_or(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RS) | cpu->get_reg(RT));
+    return 1;
+}
+
 static i64 i_ori(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->get_reg(RS) | UIMM);
     return 1;
@@ -178,8 +215,22 @@ static i64 i_sllv(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_srl(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RT) >> SA);
+    return 1;
+}
+
 static i64 i_sw(Allegrex* cpu, const u32 instr) {
     cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM, cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_sync(Allegrex*, const u32) {
+    return 1;
+}
+
+static i64 i_xor(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RS) ^ cpu->get_reg(RT));
     return 1;
 }
 
@@ -211,26 +262,29 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
     }
 }
 
+static i64 i_shift_right(Allegrex* cpu, const u32 instr) {
+    if ((RS & 1) == 0) {
+        return i_srl(cpu, instr);
+    } else {
+        cpu->get_logger()->error("Unimplemented ROTR");
+        cpu->dump_state();
+        exit(1);
+    }
+}
+
 static i64 i_special(Allegrex* cpu, const u32 instr) {
     return special_table[FUNCT](cpu, instr);
 }
 
 static i64 i_special3(Allegrex* cpu, const u32 instr) {
-    // SPECIAL3 uses the regular 6-bit FUNCT field
-    const u32 funct = FUNCT & ~0x40;
-
-    switch (funct) {
+    switch (FUNCT) {
         case Special3Opcode::SPECIAL3_OPCODE_EXT:
             return i_ext(cpu, instr);
         default:
-            cpu->get_logger()->error("Undefined SPECIAL3 instruction {:02X} ({:08X}) @ {:08X}", funct, instr, cpu->get_instr_addr());
+            cpu->get_logger()->error("Undefined SPECIAL3 instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
             cpu->dump_state();
             exit(1);
     }
-}
-
-static i64 i_sync(Allegrex*, const u32) {
-    return 1;
 }
 
 // Dummy instruction handler
@@ -253,9 +307,11 @@ void initialize() {
 
     primary_table[Opcode::OPCODE_SPECIAL ] = i_special;
     primary_table[Opcode::OPCODE_JAL     ] = i_jal;
+    primary_table[Opcode::OPCODE_BEQ     ] = i_beq;
     primary_table[Opcode::OPCODE_BNE     ] = i_bne;
     primary_table[Opcode::OPCODE_BGTZ    ] = i_bgtz;
     primary_table[Opcode::OPCODE_ADDIU   ] = i_addiu;
+    primary_table[Opcode::OPCODE_ANDI    ] = i_andi;
     primary_table[Opcode::OPCODE_ORI     ] = i_ori;
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
@@ -265,10 +321,16 @@ void initialize() {
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
 
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLL ] = i_sll;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRL ] = i_shift_right;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV] = i_sllv;
     special_table[SpecialOpcode::SPECIAL_OPCODE_JR  ] = i_jr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_JALR] = i_jalr;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC] = i_sync;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU] = i_addu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_AND ] = i_and;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_OR  ] = i_or;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_XOR ] = i_xor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_NOR ] = i_nor;
 }
 
 void soft_reset() {
