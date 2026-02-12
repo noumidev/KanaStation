@@ -16,6 +16,7 @@
 #include <common/types.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/nand.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
@@ -42,8 +43,14 @@ void initialize(const Configuration config) {
         exit(1);
     }
 
+    if (config.nand_path == nullptr) {
+        logger->error("No NAND was supplied");
+        exit(1);
+    }
+
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
+    hw::nand::initialize(config.nand_path);
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
 
@@ -62,6 +69,7 @@ void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
+    hw::nand::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
 }
@@ -70,6 +78,7 @@ void hard_reset() {
     // This should hard reset all components (including memory)
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
+    hw::nand::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
 
@@ -80,6 +89,7 @@ void shutdown() {
     // This shuts down all components
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
+    hw::nand::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
 }

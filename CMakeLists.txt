@@ -29,6 +29,7 @@ set(SOURCES
     src/core/kanacore.cpp
     src/core/hw/boot_rom.cpp
     src/core/hw/bus.cpp
+    src/core/hw/nand.cpp
     src/core/hw/allegrex/allegrex.cpp
     src/core/hw/allegrex/interpreter.cpp
     src/core/hw/allegrex/scratchpad.cpp
@@ -42,6 +43,7 @@ set(HEADERS
     include/core/kanacore.hpp
     include/core/hw/boot_rom.hpp
     include/core/hw/bus.hpp
+    include/core/hw/nand.hpp
     include/core/hw/allegrex/allegrex.hpp
     include/core/hw/allegrex/interpreter.hpp
     include/core/hw/allegrex/scratchpad.hpp
