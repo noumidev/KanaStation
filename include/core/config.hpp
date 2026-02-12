@@ -12,6 +12,9 @@ namespace kanacore {
 struct Configuration {
     // Path to a PSP boot ROM image
     const char* boot_path;
+
+    // Path to a NAND image (32 MB)
+    const char* nand_path;
 };
 
 Configuration parse_args(const int argc, const char** argv);

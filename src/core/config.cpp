@@ -10,14 +10,16 @@
 namespace kanacore {
 
 Configuration parse_args(const int argc, const char** argv) {
-    constexpr int NUM_ARGS = 1;
+    constexpr int NUM_ARGS = 2;
 
     Configuration config {
-        .boot_path = nullptr
+        .boot_path = nullptr,
+        .nand_path = nullptr,
     };
 
     if (argc > NUM_ARGS) {
         config.boot_path = argv[1];
+        config.nand_path = argv[2];
     }
 
     return config;
