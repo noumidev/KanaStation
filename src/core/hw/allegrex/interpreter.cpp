@@ -34,17 +34,20 @@ constexpr u64 SPECIAL_TABLE_SIZE = 0x40;
 
 enum Opcode {
     OPCODE_SPECIAL  = 0x00,
+    OPCODE_REGIMM   = 0x01,
     OPCODE_JAL      = 0x03,
     OPCODE_BEQ      = 0x04,
     OPCODE_BNE      = 0x05,
     OPCODE_BGTZ     = 0x07,
     OPCODE_ADDIU    = 0x09,
+    OPCODE_SLTIU    = 0x0B,
     OPCODE_ANDI     = 0x0C,
     OPCODE_ORI      = 0x0D,
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LW       = 0x23,
+    OPCODE_LHU      = 0x25,
     OPCODE_SW       = 0x2B,
     OPCODE_CACHE    = 0x2F,
 };
@@ -65,6 +68,10 @@ enum SpecialOpcode {
 
 enum Special3Opcode {
     SPECIAL3_OPCODE_EXT = 0x00,
+};
+
+enum RegimmOpcode {
+    REGIMM_OPCODE_BLTZ = 0x00,
 };
 
 enum CopOpcode {
@@ -110,6 +117,11 @@ static i64 i_bgtz(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_bltz(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) < 0, 0);
+    return 1;
+}
+
 static i64 i_bne(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) != cpu->get_reg(RT), 0);
     return 1;
@@ -149,6 +161,11 @@ static i64 i_jalr(Allegrex* cpu, const u32 instr) {
 
 static i64 i_jr(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_reg(RS), true, 0);
+    return 1;
+}
+
+static i64 i_lhu(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->read<u16>(cpu->get_reg(RS) + (i32)(i16)UIMM));
     return 1;
 }
 
@@ -215,6 +232,11 @@ static i64 i_sllv(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_sltiu(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->get_reg(RS) < UIMM);
+    return 1;
+}
+
 static i64 i_srl(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RT) >> SA);
     return 1;
@@ -257,6 +279,17 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
             return i_ctc<cop_num>(cpu, instr);
         default:
             cpu->get_logger()->error("Undefined COP{} instruction {:02X} ({:08X}) @ {:08X}", cop_num, RS, instr, cpu->get_instr_addr());
+            cpu->dump_state();
+            exit(1);
+    }
+}
+
+static i64 i_regimm(Allegrex* cpu, const u32 instr) {
+    switch (SA) {
+        case RegimmOpcode::REGIMM_OPCODE_BLTZ:
+            return i_bltz(cpu, instr);
+        default:
+            cpu->get_logger()->error("Undefined REGIMM instruction {:02X} ({:08X}) @ {:08X}", SA, instr, cpu->get_instr_addr());
             cpu->dump_state();
             exit(1);
     }
@@ -306,17 +339,20 @@ void initialize() {
     special_table.fill(i_undefined_secondary);
 
     primary_table[Opcode::OPCODE_SPECIAL ] = i_special;
+    primary_table[Opcode::OPCODE_REGIMM  ] = i_regimm;
     primary_table[Opcode::OPCODE_JAL     ] = i_jal;
     primary_table[Opcode::OPCODE_BEQ     ] = i_beq;
     primary_table[Opcode::OPCODE_BNE     ] = i_bne;
     primary_table[Opcode::OPCODE_BGTZ    ] = i_bgtz;
     primary_table[Opcode::OPCODE_ADDIU   ] = i_addiu;
+    primary_table[Opcode::OPCODE_SLTIU   ] = i_sltiu;
     primary_table[Opcode::OPCODE_ANDI    ] = i_andi;
     primary_table[Opcode::OPCODE_ORI     ] = i_ori;
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LW      ] = i_lw;
+    primary_table[Opcode::OPCODE_LHU     ] = i_lhu;
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
 
