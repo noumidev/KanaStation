@@ -10,6 +10,7 @@
 #include <array>
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 
 #include <common/types.hpp>
 #include <core/hw/bus.hpp>
