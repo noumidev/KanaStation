@@ -27,8 +27,12 @@ using namespace common;
 constexpr u64 NAND_INTERFACE_ADDR = 0x1D101000;
 constexpr u64 NAND_INTERFACE_SIZE = 0x1000;
 
+constexpr u64 DMA_BUFFER_ADDR = 0x1FF00000;
+constexpr u64 DMA_BUFFER_SIZE = 0x1000;
+
 // NAND pages (data area + spare area)
 constexpr u64 PAGE_SIZE           = 512;
+constexpr u64 PAGE_MASK           = PAGE_SIZE - 1;
 constexpr u64 PAGE_SIZE_WITH_ECC  = PAGE_SIZE + 16;
 constexpr u64 NUM_PAGES_PER_BLOCK = 32;
 
@@ -42,6 +46,7 @@ enum IoAddress {
     IO_ADDRESS_RESET   = NAND_INTERFACE_ADDR + 0x014,
     IO_ADDRESS_DMAPAGE = NAND_INTERFACE_ADDR + 0x020,
     IO_ADDRESS_DMACTRL = NAND_INTERFACE_ADDR + 0x024,
+    IO_ADDRESS_DMASTAT = NAND_INTERFACE_ADDR + 0x028,
 };
 
 #define HW_NAND_STATUS  ctx.status
@@ -91,7 +96,13 @@ static struct {
     } dma;
 } ctx;
 
-std::array<u8, NAND_SIZE> nand;
+static std::array<u8, NAND_SIZE> nand;
+
+// Used for NAND DMA, mapped to 0x1FF00xxx
+static struct {
+    u32 data_area [PAGE_SIZE / sizeof(u32)];
+    u32 spare_area[(PAGE_SIZE_WITH_ECC - PAGE_SIZE) / sizeof(u32)];
+} dma_buffer;
 
 static inline void reset_nand_status() {
     HW_NAND_STATUS.ready = true;
@@ -146,19 +157,74 @@ static void start_dma() {
         transfer_spare
     );
 
-    exit(1);
+    if (is_write) {
+        logger->error("Unimplemented NAND page program via DMA");
+        exit(1);
+    }
+
+    const u64 nand_offset = HW_NAND_DMAPAGE * PAGE_SIZE_WITH_ECC;
+
+    if (transfer_data) {
+        std::memcpy(dma_buffer.data_area, nand.data() + nand_offset, PAGE_SIZE);
+    }
+
+    if (transfer_spare) {
+        std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
+    }
+
+    // TODO: delay command completion
+    HW_NAND_DMACTRL.busy = false;
 }
 
 static u32 read(const u32 addr) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
-
             return HW_NAND_STATUS.raw;
+        case IoAddress::IO_ADDRESS_DMACTRL:
+            logger->debug("DMACTRL read32");
+            return HW_NAND_DMACTRL.raw;
+        case IoAddress::IO_ADDRESS_DMASTAT:
+            logger->debug("DMASTAT read32");
+
+            // This returns an error code upon DMA failure, but
+            // I don't know what possible error codes look like
+            return 0;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
     }
+}
+
+static u32 read_dma_buffer(const u32 addr) {
+    // TODO: use named constants
+    u32 data;
+
+    if ((addr & ~PAGE_MASK) == DMA_BUFFER_ADDR) {
+        data = dma_buffer.data_area[(addr & PAGE_MASK) / sizeof(u32)];
+    } else {
+        switch (addr) {
+            case DMA_BUFFER_ADDR + 0x800:
+                // See notes on ECC above
+                data = dma_buffer.spare_area[0];
+                break;
+            case DMA_BUFFER_ADDR + 0x900:
+                data = dma_buffer.spare_area[1];
+                break;
+            case DMA_BUFFER_ADDR + 0x904:
+                data = dma_buffer.spare_area[2];
+                break;
+            case DMA_BUFFER_ADDR + 0x908:
+                data = dma_buffer.spare_area[3];
+                break;
+            default:
+                logger->error("Unmapped read32 @ {:08X}", addr);
+                exit(1);
+        }
+    }
+
+    logger->debug("DMA buffer read32 @ {:08X}", addr);
+    return data;
 }
 
 static void write(const u32 addr, const u32 data) {
@@ -193,6 +259,33 @@ static void write(const u32 addr, const u32 data) {
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             exit(1);
     }
+}
+
+static void write_dma_buffer(const u32 addr, const u32 data) {
+    // TODO: use named constants
+    if ((addr & ~PAGE_MASK) == DMA_BUFFER_ADDR) {
+        dma_buffer.data_area[(addr & PAGE_MASK) / sizeof(u32)] = data;
+    } else {
+        switch (addr) {
+            case DMA_BUFFER_ADDR + 0x800:
+                dma_buffer.spare_area[0] = data;
+                break;
+            case DMA_BUFFER_ADDR + 0x900:
+                dma_buffer.spare_area[1] = data;
+                break;
+            case DMA_BUFFER_ADDR + 0x904:
+                dma_buffer.spare_area[2] = data;
+                break;
+            case DMA_BUFFER_ADDR + 0x908:
+                dma_buffer.spare_area[3] = data;
+                break;
+            default:
+                logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
+                exit(1);
+        }
+    }
+
+    logger->debug("DMA buffer write32 @ {:08X} = {:08X}", addr, data);
 }
 
 void initialize(const char* nand_path) {
@@ -238,6 +331,14 @@ void hard_reset() {
     };
 
     bus::map(NAND_INTERFACE_ADDR, NAND_INTERFACE_SIZE, page_desc);
+
+    const bus::PageDescriptor dma_page_desc {
+        // See above
+        .read32_func  = read_dma_buffer,
+        .write32_func = write_dma_buffer,
+    };
+
+    bus::map(DMA_BUFFER_ADDR, DMA_BUFFER_SIZE, dma_page_desc);
 
     reset_nand_chip();
     reset_nand_interface();
