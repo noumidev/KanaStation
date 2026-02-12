@@ -17,6 +17,7 @@
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/nand.hpp>
+#include <core/hw/shared_ram.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
@@ -51,6 +52,7 @@ void initialize(const Configuration config) {
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::nand::initialize(config.nand_path);
+    hw::shared_ram::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
 
@@ -70,6 +72,7 @@ void soft_reset() {
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
     hw::nand::soft_reset();
+    hw::shared_ram::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
 }
@@ -79,6 +82,7 @@ void hard_reset() {
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
     hw::nand::hard_reset();
+    hw::shared_ram::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
 
@@ -90,6 +94,7 @@ void shutdown() {
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
     hw::nand::shutdown();
+    hw::shared_ram::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
 }
