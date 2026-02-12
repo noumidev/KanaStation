@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(-Wall -Wextra -Wall -Werror)
+add_compile_options(-Wall -Wextra -Wall)
 
 # Default to release builds with debug info
 if(NOT CMAKE_BUILD_TYPE)
@@ -15,6 +15,7 @@ endif()
 project(KanaStation CXX)
 
 # Add subdirectories
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/cryptopp-cmake)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/spdlog)
 
 # Enable assertions in RelWithDebInfo builds
@@ -53,4 +54,4 @@ set(HEADERS
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
+target_link_libraries(${PROJECT_NAME} PRIVATE cryptopp spdlog)
