@@ -17,6 +17,8 @@ namespace kanacore::hw::allegrex {
     
 using namespace common;
 
+constexpr bool SILENT_JUMPS = true;
+
 constexpr u32 BOOT_EXCEPTION_ADDR = 0xBFC00000;
 
 Allegrex::Allegrex(const CpuId cpu_id) : cpu_id(cpu_id) {
@@ -120,14 +122,14 @@ bool Allegrex::in_delay_slot() const {
 }
 
 void Allegrex::jump(const u32 target) {
-    logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
+    if constexpr (!SILENT_JUMPS) logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
 
     regfile.pc = target;
     regfile.next_pc = target + sizeof(u32);
 }
 
 void Allegrex::delayed_jump(const u32 target) {
-    logger->debug("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
+    if constexpr (!SILENT_JUMPS) logger->debug("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
 
     regfile.next_pc = target;
 }
