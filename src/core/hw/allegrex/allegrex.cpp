@@ -76,7 +76,8 @@ template void Allegrex::write(const u32, const u16);
 template void Allegrex::write(const u32, const u32);
 
 void Allegrex::soft_reset() {
-
+    // This has a bit more to it than this, but for now this should suffice
+    jump(BOOT_EXCEPTION_ADDR);
 }
 
 void Allegrex::hard_reset() {
