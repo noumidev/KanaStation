@@ -34,6 +34,7 @@ set(SOURCES
     src/core/hw/kirk.cpp
     src/core/hw/nand.cpp
     src/core/hw/shared_ram.cpp
+    src/core/hw/sysctrl.cpp
     src/core/hw/allegrex/allegrex.cpp
     src/core/hw/allegrex/interpreter.cpp
     src/core/hw/allegrex/scratchpad.cpp
@@ -51,6 +52,7 @@ set(HEADERS
     include/core/hw/kirk.hpp
     include/core/hw/nand.hpp
     include/core/hw/shared_ram.hpp
+    include/core/hw/sysctrl.hpp
     include/core/hw/allegrex/allegrex.hpp
     include/core/hw/allegrex/interpreter.hpp
     include/core/hw/allegrex/scratchpad.hpp
