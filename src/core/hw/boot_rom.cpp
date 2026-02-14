@@ -72,7 +72,8 @@ void initialize(const char* boot_path) {
 }
 
 void soft_reset() {
-
+    // Unmaps boot ROM after SC reset
+    bus::unmap(BOOT_ROM_ADDR, BOOT_ROM_SIZE);
 }
 
 void hard_reset() {
