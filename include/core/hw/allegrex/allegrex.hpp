@@ -49,6 +49,8 @@ struct Cp0 {
 
     enum StatusRegister {
         STATUS_REGISTER_CONFIG = 0x10,
+        STATUS_REGISTER_TAGLO  = 0x1C,
+        STATUS_REGISTER_TAGHI  = 0x1D,
     };
 
     // 2^(12 + 2) = 16 KB
@@ -58,6 +60,9 @@ struct Cp0 {
 
     // "Free real estate"
     common::u32 control_regs[NUM_REGS];
+
+    common::u32 taglo;
+    common::u32 taghi;
 };
 
 struct Allegrex {

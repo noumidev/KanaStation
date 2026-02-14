@@ -189,6 +189,12 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
         case Cp0::StatusRegister::STATUS_REGISTER_CONFIG:
             data = Cp0::CONFIG;
             break;
+        case Cp0::StatusRegister::STATUS_REGISTER_TAGLO:
+            data = cp0.taglo;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_TAGHI:
+            data = cp0.taghi;
+            break;
         default:
             logger->warn("Unimplemented read from CP0 status register {}", Cp0::STATUS_REGISTER_NAMES[idx]);
             return 0;
@@ -202,10 +208,18 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     assert(idx < Cp0::NUM_REGS);
 
     switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_TAGLO:
+            cp0.taglo = data;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_TAGHI:
+            cp0.taghi = data;
+            break;
         default:
             logger->warn("Unimplemented write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
-            break;
+            return;
     }
+
+    logger->debug("Write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
 }
 
 u32 Allegrex::fetch_instr() {
