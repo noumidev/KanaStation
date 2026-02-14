@@ -172,4 +172,23 @@ void map(const u32 addr, const u32 size, const PageDescriptor page_desc) {
     }
 }
 
+void unmap(const u32 addr, const u32 size) {
+    if ((addr & PAGE_MASK) != 0) {
+        logger->error("Address not aligned on a page boundary {:08X}", addr);
+        exit(1);
+    }
+
+    if ((size & PAGE_MASK) != 0) {
+        logger->error("Size not aligned on a page boundary {}", size);
+        exit(1);
+    }
+
+    const u64 first_page = addr / PAGE_SIZE;
+    const u64 num_pages  = size / PAGE_SIZE;
+
+    for (u64 page = first_page; page < (first_page + num_pages); page++) {
+        page_table[page] = PageDescriptor{};
+    }
+}
+
 };

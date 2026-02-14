@@ -43,4 +43,6 @@ void write(const common::u32 addr, const T data);
 // Maps read/write handlers 
 void map(const common::u32 addr, const common::u32 size, const PageDescriptor page_desc);
 
+void unmap(const common::u32 addr, const common::u32 size);
+
 };
