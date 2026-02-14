@@ -32,6 +32,7 @@ constexpr u64 SYSCTRL_SIZE = 0x1000;
 
 enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
+    IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
@@ -42,6 +43,7 @@ enum IoAddress {
 };
 
 #define HW_SYSCTRL_NMIEN      ctx.nmi.enable
+#define HW_SYSCTRL_NMIFLAGS   ctx.nmi.flags
 #define HW_SYSCTRL_RESETEN    ctx.reset_enable
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
@@ -64,6 +66,7 @@ static std::array<void (*)(void), ResetDevice::RESET_DEVICE_NUM> reset_funcs;
 static struct {
     struct {
         u32 enable;
+        u32 flags;
     } nmi;
 
     u32 reset_enable;
@@ -149,6 +152,13 @@ static void write_reset_enable(const u32 data) {
 
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_NMIFLAGS:
+            logger->debug("NMIFLAGS write32 = {:08X}", data);
+            
+            // IPL writes all 1s after reset, so this probably clears bits when
+            // 1 is written to them
+            HW_SYSCTRL_NMIFLAGS &= ~data;
+            break;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN write32 = {:08X}", data);
             write_reset_enable(data);
