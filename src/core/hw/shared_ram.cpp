@@ -52,8 +52,23 @@ void initialize() {
 }
 
 void soft_reset() {
-    // This needs to unmap the scratchpad mapping and map the entire 2 MB
-    // to 0x1FC00000
+    const bus::PageDescriptor page_desc {
+        .read8_func   = read<u8>,
+        .read16_func  = read<u16>,
+        .read32_func  = read<u32>,
+        .write8_func  = write<u8>,
+        .write16_func = write<u16>,
+        .write32_func = write<u32>,
+    };
+
+    // Unmaps scratchpad, maps shared RAM where the boot ROM used to be
+    bus::unmap(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE);
+    bus::map(SHARED_RAM_ADDR, SHARED_RAM_SIZE, page_desc);
+
+    // Because our address decoding logic doesn't recognize that the scratchpad
+    // area is the first 4 KB of shared RAM, we manually move said area to the beginning
+    // of shared RAM (needed for IPL boot)
+    std::memcpy(shared_ram.data(), shared_ram.data() + (SCRATCHPAD_ADDR & SHARED_RAM_MASK), SCRATCHPAD_SIZE);
 }
 
 void hard_reset() {
