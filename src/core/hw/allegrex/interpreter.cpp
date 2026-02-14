@@ -7,7 +7,9 @@
 
 #include <core/hw/allegrex/interpreter.hpp>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdlib>
 
 #include <common/types.hpp>
@@ -29,25 +31,37 @@ using namespace common;
 
 using Instruction = i64 (*)(Allegrex*, const u32);
 
+constexpr bool SILENT_CACHE = true;
+
 constexpr u64 PRIMARY_TABLE_SIZE = 0x40;
 constexpr u64 SPECIAL_TABLE_SIZE = 0x40;
 
 enum Opcode {
     OPCODE_SPECIAL  = 0x00,
     OPCODE_REGIMM   = 0x01,
+    OPCODE_J        = 0x02,
     OPCODE_JAL      = 0x03,
     OPCODE_BEQ      = 0x04,
     OPCODE_BNE      = 0x05,
+    OPCODE_BLEZ     = 0x06,
     OPCODE_BGTZ     = 0x07,
     OPCODE_ADDIU    = 0x09,
+    OPCODE_SLTI     = 0x0A,
     OPCODE_SLTIU    = 0x0B,
     OPCODE_ANDI     = 0x0C,
     OPCODE_ORI      = 0x0D,
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
+    OPCODE_BEQL     = 0x14,
+    OPCODE_BNEL     = 0x15,
     OPCODE_SPECIAL3 = 0x1F,
+    OPCODE_LB       = 0x20,
+    OPCODE_LH       = 0x21,
     OPCODE_LW       = 0x23,
+    OPCODE_LBU      = 0x24,
     OPCODE_LHU      = 0x25,
+    OPCODE_SB       = 0x28,
+    OPCODE_SH       = 0x29,
     OPCODE_SW       = 0x2B,
     OPCODE_CACHE    = 0x2F,
 };
@@ -55,29 +69,47 @@ enum Opcode {
 enum SpecialOpcode {
     SPECIAL_OPCODE_SLL  = 0x00,
     SPECIAL_OPCODE_SRL  = 0x02,
+    SPECIAL_OPCODE_SRA  = 0x03,
     SPECIAL_OPCODE_SLLV = 0x04,
+    SPECIAL_OPCODE_SRLV = 0x06,
     SPECIAL_OPCODE_JR   = 0x08,
     SPECIAL_OPCODE_JALR = 0x09,
+    SPECIAL_OPCODE_MOVZ = 0x0A,
+    SPECIAL_OPCODE_MOVN = 0x0B,
     SPECIAL_OPCODE_SYNC = 0x0F,
+    SPECIAL_OPCODE_CLZ  = 0x16,
     SPECIAL_OPCODE_ADDU = 0x21,
+    SPECIAL_OPCODE_SUBU = 0x23,
     SPECIAL_OPCODE_AND  = 0x24,
     SPECIAL_OPCODE_OR   = 0x25,
     SPECIAL_OPCODE_XOR  = 0x26,
     SPECIAL_OPCODE_NOR  = 0x27,
+    SPECIAL_OPCODE_SLT  = 0x2A,
+    SPECIAL_OPCODE_SLTU = 0x2B,
+    SPECIAL_OPCODE_MAX  = 0x2C,
+    SPECIAL_OPCODE_MIN  = 0x2D,
 };
 
 enum Special3Opcode {
-    SPECIAL3_OPCODE_EXT = 0x00,
+    SPECIAL3_OPCODE_EXT   = 0x00,
+    SPECIAL3_OPCODE_INS   = 0x04,
+    SPECIAL3_OPCODE_BSHFL = 0x20,
 };
 
 enum RegimmOpcode {
-    REGIMM_OPCODE_BLTZ = 0x00,
+    REGIMM_OPCODE_BLTZ   = 0x00,
+    REGIMM_OPCODE_BGEZ   = 0x01,
+    REGIMM_OPCODE_BLTZAL = 0x10,
 };
 
 enum CopOpcode {
     COP_OPCODE_MFC = 0x00,
     COP_OPCODE_MTC = 0x04,
     COP_OPCODE_CTC = 0x06,
+};
+
+enum BitShuffleOpcode {
+    BIT_SHUFFLE_OPCODE_BITREV = 0x14,
 };
 
 enum CopNum {
@@ -112,8 +144,36 @@ static i64 i_beq(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_beql(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) == cpu->get_reg(RT), 0);
+    return 1;
+}
+
+static i64 i_bgez(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) >= 0, 0);
+    return 1;
+}
+
 static i64 i_bgtz(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) > 0, 0);
+    return 1;
+}
+
+static i64 i_bitrev(Allegrex* cpu, const u32 instr) {
+    const u32 t = cpu->get_reg(RT);
+
+    u32 t_reversed = 0;
+
+    for (u32 i = 0; i < (8 * sizeof(u32)); i++) {
+        t_reversed |= ((t >> (31 - i)) & 1) << i;
+    }
+
+    cpu->set_reg(RD, t_reversed);
+    return 1;
+}
+
+static i64 i_blez(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) <= 0, 0);
     return 1;
 }
 
@@ -122,8 +182,23 @@ static i64 i_bltz(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_bltzal(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) < 0, 31);
+    return 1;
+}
+
 static i64 i_bne(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) != cpu->get_reg(RT), 0);
+    return 1;
+}
+
+static i64 i_bnel(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) != cpu->get_reg(RT), 0);
+    return 1;
+}
+
+static i64 i_clz(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, std::countl_zero(cpu->get_reg(RS)));
     return 1;
 }
 
@@ -149,6 +224,24 @@ static i64 i_ext(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_ins(Allegrex* cpu, const u32 instr) {
+    // SIZE = POS + size - 1
+    const i32 size = SIZE - POS;
+
+    // What happens when the CPU encounters this?
+    assert((size >= 0) && ((SIZE + 1) <= 32));
+
+    const u32 mask = 0xFFFFFFFFU >> (31 - size);
+
+    cpu->set_reg(RT, (cpu->get_reg(RT) & ~(mask << POS)) | ((cpu->get_reg(RS) & mask) << POS));
+    return 1;
+}
+
+static i64 i_j(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>((cpu->get_pc() & 0xF0000000) + (TARGET << 2), true, 0);
+    return 1;
+}
+
 static i64 i_jal(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>((cpu->get_pc() & 0xF0000000) + (TARGET << 2), true, 31);
     return 1;
@@ -161,6 +254,21 @@ static i64 i_jalr(Allegrex* cpu, const u32 instr) {
 
 static i64 i_jr(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_reg(RS), true, 0);
+    return 1;
+}
+
+static i64 i_lb(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, (i32)(i8)cpu->read<u8>(cpu->get_reg(RS) + (i32)(i16)UIMM));
+    return 1;
+}
+
+static i64 i_lbu(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->read<u8>(cpu->get_reg(RS) + (i32)(i16)UIMM));
+    return 1;
+}
+
+static i64 i_lh(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, (i32)(i16)cpu->read<u16>(cpu->get_reg(RS) + (i32)(i16)UIMM));
     return 1;
 }
 
@@ -179,6 +287,11 @@ static i64 i_lw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_max(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, std::max((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
+    return 1;
+}
+
 template<int cop_num>
 static i64 i_mfc(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
@@ -190,6 +303,21 @@ static i64 i_mfc(Allegrex* cpu, const u32 instr) {
             exit(1);
     }
 
+    return 1;
+}
+
+static i64 i_min(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, std::min((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
+    return 1;
+}
+
+static i64 i_movn(Allegrex* cpu, const u32 instr) {
+    if (cpu->get_reg(RT) != 0) cpu->set_reg(RD, cpu->get_reg(RS));
+    return 1;
+}
+
+static i64 i_movz(Allegrex* cpu, const u32 instr) {
+    if (cpu->get_reg(RT) == 0) cpu->set_reg(RD, cpu->get_reg(RS));
     return 1;
 }
 
@@ -222,6 +350,21 @@ static i64 i_ori(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_rotrv(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, std::rotr(cpu->get_reg(RT), (cpu->get_reg(RS) & 0x1F)));
+    return 1;
+}
+
+static i64 i_sb(Allegrex* cpu, const u32 instr) {
+    cpu->write<u8>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u8)cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_sh(Allegrex* cpu, const u32 instr) {
+    cpu->write<u16>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u16)cpu->get_reg(RT));
+    return 1;
+}
+
 static i64 i_sll(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RT) << SA);
     return 1;
@@ -232,13 +375,43 @@ static i64 i_sllv(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_slt(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, (i32)cpu->get_reg(RS) < (i32)cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_slti(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, (i32)cpu->get_reg(RS) < (i32)(i16)UIMM);
+    return 1;
+}
+
 static i64 i_sltiu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->get_reg(RS) < UIMM);
     return 1;
 }
 
+static i64 i_sltu(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RS) < cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_sra(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, (i32)cpu->get_reg(RT) >> SA);
+    return 1;
+}
+
 static i64 i_srl(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RT) >> SA);
+    return 1;
+}
+
+static i64 i_srlv(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RT) >> (cpu->get_reg(RS) & 0x1F));
+    return 1;
+}
+
+static i64 i_subu(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(RS) - cpu->get_reg(RT));
     return 1;
 }
 
@@ -256,12 +429,23 @@ static i64 i_xor(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_bit_shuffle(Allegrex* cpu, const u32 instr) {
+    switch (SA) {
+        case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_BITREV:
+            return i_bitrev(cpu, instr);
+        default:
+            cpu->get_logger()->error("Undefined BSHFL instruction {:02X} ({:08X}) @ {:08X}", SA, instr, cpu->get_instr_addr());
+            cpu->dump_state();
+            exit(1);
+    }
+}
+
 static i64 i_cache(Allegrex* cpu, const u32 instr) {
     const u32 addr = cpu->get_reg(RS) + (i32)(i16)UIMM;
 
     switch (RT) {
         default:
-            cpu->get_logger()->warn("Unimplemented CACHE instruction {:02X} ({:08X}) for address {:08X}", RT, instr, addr);
+            if constexpr (!SILENT_CACHE) cpu->get_logger()->warn("Unimplemented CACHE instruction {:02X} ({:08X}) for address {:08X}", RT, instr, addr);
             break;
     }
 
@@ -285,11 +469,15 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_regimm(Allegrex* cpu, const u32 instr) {
-    switch (SA) {
+    switch (RT) {
         case RegimmOpcode::REGIMM_OPCODE_BLTZ:
             return i_bltz(cpu, instr);
+        case RegimmOpcode::REGIMM_OPCODE_BGEZ:
+            return i_bgez(cpu, instr);
+        case RegimmOpcode::REGIMM_OPCODE_BLTZAL:
+            return i_bltzal(cpu, instr);
         default:
-            cpu->get_logger()->error("Undefined REGIMM instruction {:02X} ({:08X}) @ {:08X}", SA, instr, cpu->get_instr_addr());
+            cpu->get_logger()->error("Undefined REGIMM instruction {:02X} ({:08X}) @ {:08X}", RT, instr, cpu->get_instr_addr());
             cpu->dump_state();
             exit(1);
     }
@@ -305,6 +493,14 @@ static i64 i_shift_right(Allegrex* cpu, const u32 instr) {
     }
 }
 
+static i64 i_shift_right_variable(Allegrex* cpu, const u32 instr) {
+    if ((SA & 1) == 0) {
+        return i_srlv(cpu, instr);
+    } else {
+        return i_rotrv(cpu, instr);
+    }
+}
+
 static i64 i_special(Allegrex* cpu, const u32 instr) {
     return special_table[FUNCT](cpu, instr);
 }
@@ -313,6 +509,10 @@ static i64 i_special3(Allegrex* cpu, const u32 instr) {
     switch (FUNCT) {
         case Special3Opcode::SPECIAL3_OPCODE_EXT:
             return i_ext(cpu, instr);
+        case Special3Opcode::SPECIAL3_OPCODE_INS:
+            return i_ins(cpu, instr);
+        case Special3Opcode::SPECIAL3_OPCODE_BSHFL:
+            return i_bit_shuffle(cpu, instr);
         default:
             cpu->get_logger()->error("Undefined SPECIAL3 instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
             cpu->dump_state();
@@ -340,33 +540,53 @@ void initialize() {
 
     primary_table[Opcode::OPCODE_SPECIAL ] = i_special;
     primary_table[Opcode::OPCODE_REGIMM  ] = i_regimm;
+    primary_table[Opcode::OPCODE_J       ] = i_j;
     primary_table[Opcode::OPCODE_JAL     ] = i_jal;
     primary_table[Opcode::OPCODE_BEQ     ] = i_beq;
     primary_table[Opcode::OPCODE_BNE     ] = i_bne;
+    primary_table[Opcode::OPCODE_BLEZ    ] = i_blez;
     primary_table[Opcode::OPCODE_BGTZ    ] = i_bgtz;
     primary_table[Opcode::OPCODE_ADDIU   ] = i_addiu;
+    primary_table[Opcode::OPCODE_SLTI    ] = i_slti;
     primary_table[Opcode::OPCODE_SLTIU   ] = i_sltiu;
     primary_table[Opcode::OPCODE_ANDI    ] = i_andi;
     primary_table[Opcode::OPCODE_ORI     ] = i_ori;
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
+    primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
+    primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
+    primary_table[Opcode::OPCODE_LB      ] = i_lb;
+    primary_table[Opcode::OPCODE_LH      ] = i_lh;
     primary_table[Opcode::OPCODE_LW      ] = i_lw;
+    primary_table[Opcode::OPCODE_LBU     ] = i_lbu;
     primary_table[Opcode::OPCODE_LHU     ] = i_lhu;
+    primary_table[Opcode::OPCODE_SB      ] = i_sb;
+    primary_table[Opcode::OPCODE_SH      ] = i_sh;
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
 
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLL ] = i_sll;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SRL ] = i_shift_right;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRA ] = i_sra;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV] = i_sllv;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV] = i_shift_right_variable;
     special_table[SpecialOpcode::SPECIAL_OPCODE_JR  ] = i_jr;
     special_table[SpecialOpcode::SPECIAL_OPCODE_JALR] = i_jalr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ] = i_movz;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN] = i_movn;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC] = i_sync;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ ] = i_clz;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU] = i_addu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU] = i_subu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_AND ] = i_and;
     special_table[SpecialOpcode::SPECIAL_OPCODE_OR  ] = i_or;
     special_table[SpecialOpcode::SPECIAL_OPCODE_XOR ] = i_xor;
     special_table[SpecialOpcode::SPECIAL_OPCODE_NOR ] = i_nor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLT ] = i_slt;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU] = i_sltu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MAX ] = i_max;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MIN ] = i_min;
 }
 
 void soft_reset() {
