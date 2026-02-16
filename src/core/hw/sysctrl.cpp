@@ -16,7 +16,6 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#include <common/types.hpp>
 #include <core/kanacore.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
@@ -37,6 +36,7 @@ enum IoAddress {
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
     IO_ADDRESS_CLOCKEN_HI = SYSCTRL_ADDR + 0x058,
+    IO_ADDRESS_SPICLKSEL  = SYSCTRL_ADDR + 0x064,
     IO_ADDRESS_PLLFREQ    = SYSCTRL_ADDR + 0x068,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
@@ -48,6 +48,7 @@ enum IoAddress {
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
 #define HW_SYSCTRL_CLOCKEN_HI ctx.clock_enable[1]
+#define HW_SYSCTRL_SPICLKSEL  ctx.spi_clock_select
 #define HW_SYSCTRL_PLLFREQ    ctx.pll_frequency
 #define HW_SYSCTRL_IOEN       ctx.io_enable
 #define HW_SYSCTRL_GPIOEN     ctx.gpio_enable
@@ -72,6 +73,7 @@ static struct {
     u32 reset_enable;
     u32 busclock_enable;
     u32 clock_enable[2];
+    u32 spi_clock_select;
     u32 pll_frequency;
     u32 io_enable;
     u32 gpio_enable;
@@ -105,6 +107,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_CLOCKEN_HI:
             logger->debug("CLOCKEN_HI read32");
             return HW_SYSCTRL_CLOCKEN_HI;
+        case IoAddress::IO_ADDRESS_SPICLKSEL:
+            logger->debug("SPICLKSEL read32");
+            return HW_SYSCTRL_SPICLKSEL;
         case IoAddress::IO_ADDRESS_PLLFREQ:
             logger->debug("PLLFREQ read32");
 
@@ -181,6 +186,11 @@ static void write(const u32 addr, const u32 data) {
             // See above
             HW_SYSCTRL_CLOCKEN_HI = data;
             break;
+        case IoAddress::IO_ADDRESS_SPICLKSEL:
+            logger->debug("SPICLKSEL write32 = {:08X}", data);
+
+            HW_SYSCTRL_SPICLKSEL = data;
+            break;
         case IoAddress::IO_ADDRESS_IOEN:
             logger->debug("IOEN write32 = {:08X}", data);
 
@@ -226,6 +236,10 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+u32 get_gpio_enable() {
+    return HW_SYSCTRL_GPIOEN;
 }
 
 };
