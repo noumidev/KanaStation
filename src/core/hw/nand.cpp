@@ -43,18 +43,26 @@ constexpr u64 NAND_SIZE  = NUM_BLOCKS * BLOCK_SIZE;
 enum IoAddress {
     IO_ADDRESS_STATUS  = NAND_INTERFACE_ADDR + 0x004,
     IO_ADDRESS_COMMAND = NAND_INTERFACE_ADDR + 0x008,
+    IO_ADDRESS_PAGE    = NAND_INTERFACE_ADDR + 0x00C,
     IO_ADDRESS_RESET   = NAND_INTERFACE_ADDR + 0x014,
     IO_ADDRESS_DMAPAGE = NAND_INTERFACE_ADDR + 0x020,
     IO_ADDRESS_DMACTRL = NAND_INTERFACE_ADDR + 0x024,
     IO_ADDRESS_DMASTAT = NAND_INTERFACE_ADDR + 0x028,
+    IO_ADDRESS_DMAINTR = NAND_INTERFACE_ADDR + 0x038,
+    IO_ADDRESS_RESUME  = NAND_INTERFACE_ADDR + 0x200,
+    IO_ADDRESS_SERIAL  = NAND_INTERFACE_ADDR + 0x300,
 };
 
 #define HW_NAND_STATUS  ctx.status
+#define HW_NAND_PAGE    ctx.page
 #define HW_NAND_DMAPAGE ctx.dma.page
 #define HW_NAND_DMACTRL ctx.dma.control
+#define HW_NAND_DMAINTR ctx.dma.interrupt
 
 enum NandCommand {
-    NAND_COMMAND_RESET = 0xFF,
+    NAND_COMMAND_READ_STATUS = 0x70,
+    NAND_COMMAND_READ_ID     = 0x90,
+    NAND_COMMAND_RESET       = 0xFF,
 };
 
 enum DmaDirection {
@@ -70,11 +78,13 @@ static struct {
         u8 raw;
 
         struct {
-            u8 ready           : 1;
-            u8                 : 6;
-            u8 write_protected : 1;
+            u8 ready    : 1;
+            u8          : 6;
+            u8 unlocked : 1;
         };
     } status;
+
+    u32 page;
 
     // NAND DMA related registers
     struct {
@@ -93,10 +103,54 @@ static struct {
                 u16                : 6;
             };
         } control;
+        
+        union {
+            u16 raw;
+
+            struct {
+                u16 flags : 2;
+                u16       : 6;
+                u16 other : 2;
+                u16       : 6;
+            };
+        } interrupt;
     } dma;
 } ctx;
 
 static std::array<u8, NAND_SIZE> nand;
+
+// Ring buffer used for various NAND commands ("serial data")
+static struct {
+private:
+    std::array<u8, PAGE_SIZE_WITH_ECC> buf;
+
+    u64 read_ptr;
+    u64 size;
+
+    u8 get_byte() {
+        const u8 data = buf[read_ptr++];
+
+        if (read_ptr >= size) {
+            read_ptr = 0;
+        }
+
+        return data;
+    }
+
+public:
+    // Returns 32 bits of data at once (get_byte() handles wraparound)
+    u32 get() {
+        return get_byte() | (get_byte() << 8) | (get_byte() << 16) | (get_byte() << 24);
+    }
+
+    // Sets the buffer to be read
+    void set(const u8* data, const u64 size) {
+        std::memcpy(this->buf.data(), data, size);
+    
+        this->size = size;
+        read_ptr = 0;
+    }
+} nand_buffer;
 
 // Used for NAND DMA, mapped to 0x1FF00xxx
 static struct {
@@ -104,8 +158,16 @@ static struct {
     u32 spare_area[(PAGE_SIZE_WITH_ECC - PAGE_SIZE) / sizeof(u32)];
 } dma_buffer;
 
+static inline void set_nand_lock(const bool lock) {
+    logger->debug("Set lock: {}", lock);
+
+    HW_NAND_STATUS.unlocked = !lock;
+}
+
 static inline void reset_nand_status() {
     HW_NAND_STATUS.ready = true;
+
+    set_nand_lock(true);
 }
 
 // For use with command RESET
@@ -119,18 +181,46 @@ static void reset_nand_interface() {
     // Does this reset the chip?
 }
 
+static void command_read_status() {
+    logger->debug("READ_STATUS");
+
+    // "Build" the NAND chip status, which has a different layout from HW_NAND_STATUS
+    const u16 status = (HW_NAND_STATUS.unlocked << 7) | (HW_NAND_STATUS.ready << 6);
+
+    nand_buffer.set((u8*)&status, sizeof(status));
+}
+
+static void command_read_id() {
+    constexpr u16 NAND_ID = 0x35EC;
+
+    logger->debug("READ_ID");
+    
+    // The NAND manual says the chip ID is two bytes long, but my tests suggest
+    // this command actually returns five bytes.
+    // On my PSP-2000, this returns 0xEC 0x36 0x5A 0x3F 0x74. Nevertheless,
+    // until I know what this returns on my PSP-1000, we will return two bytes here
+    nand_buffer.set((u8*)&NAND_ID, sizeof(NAND_ID));
+}
+
 static void command_reset() {
     logger->debug("RESET");
-
-    // This should abort currently active commands as well, for now
-    // let's just make sure this doesn't happen in the first place
-    assert(HW_NAND_STATUS.ready);
 
     reset_nand_chip();
 }
 
 static void start_command(const u32 command) {
+    // RESET can abort currently ongoing commands, for now
+    // let's just make sure this doesn't happen in the first place
+    assert(HW_NAND_STATUS.ready);
+
     switch (command) {
+        case NandCommand::NAND_COMMAND_READ_STATUS:
+            command_read_status();
+            break;
+        case NandCommand::NAND_COMMAND_READ_ID:
+            // Technically "needs" a NAND address, but we can ignore this for now
+            command_read_id();
+            break;
         case NandCommand::NAND_COMMAND_RESET:
             command_reset();
             break;
@@ -140,6 +230,7 @@ static void start_command(const u32 command) {
     }
 
     // TODO: delay command completion
+    HW_NAND_STATUS.ready = true;
 }
 
 static void start_dma() {
@@ -190,6 +281,12 @@ static u32 read(const u32 addr) {
             // This returns an error code upon DMA failure, but
             // I don't know what possible error codes look like
             return 0;
+        case IoAddress::IO_ADDRESS_DMAINTR:
+            logger->debug("DMAINTR read32");
+            return HW_NAND_DMAINTR.raw;
+        case IoAddress::IO_ADDRESS_SERIAL:
+            logger->debug("SERIAL read32");
+            return nand_buffer.get();
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -229,10 +326,21 @@ static u32 read_dma_buffer(const u32 addr) {
 
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_STATUS:
+            logger->debug("STATUS write32 = {:08X}", data);
+
+            // Yes, this is writable
+            set_nand_lock((data & 0x80) == 0);
+            break;
         case IoAddress::IO_ADDRESS_COMMAND:
             logger->debug("COMMAND write32 = {:08X}", data);
 
             start_command(data);
+            break;
+        case IoAddress::IO_ADDRESS_PAGE:
+            logger->debug("PAGE write32 = {:08X}", data);
+
+            HW_NAND_PAGE = data >> 10;
             break;
         case IoAddress::IO_ADDRESS_RESET:
             logger->debug("RESET write32 = {:08X}", data);
@@ -254,6 +362,22 @@ static void write(const u32 addr, const u32 data) {
             if (HW_NAND_DMACTRL.busy) {
                 start_dma();
             }
+            break;
+        case IoAddress::IO_ADDRESS_DMAINTR:
+            logger->debug("DMAINTR write32 = {:08X}", data);
+
+            // Bits 8-9 are freely readable/writable, bits 0-1 are cleared
+            // upon writing 1.
+            HW_NAND_DMAINTR.other  = data >> 8;
+            HW_NAND_DMAINTR.flags &= ~(data & 3);
+
+            // This should clear NAND interrupts
+            break;
+        case IoAddress::IO_ADDRESS_RESUME:
+            logger->debug("RESUME write32 = {:08X}", data);
+            
+            // Unsure what this register is for, the NAND driver always writes
+            // 0x0B040205. The PSP Dev Wiki assumes this "resumes" NAND (DMA?) operation
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
