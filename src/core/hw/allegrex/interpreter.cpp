@@ -50,6 +50,7 @@ enum Opcode {
     OPCODE_SLTIU    = 0x0B,
     OPCODE_ANDI     = 0x0C,
     OPCODE_ORI      = 0x0D,
+    OPCODE_XORI     = 0x0E,
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
     OPCODE_BEQL     = 0x14,
@@ -429,6 +430,11 @@ static i64 i_xor(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_xori(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->get_reg(RS) ^ UIMM);
+    return 1;
+}
+
 static i64 i_bit_shuffle(Allegrex* cpu, const u32 instr) {
     switch (SA) {
         case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_BITREV:
@@ -551,6 +557,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_SLTIU   ] = i_sltiu;
     primary_table[Opcode::OPCODE_ANDI    ] = i_andi;
     primary_table[Opcode::OPCODE_ORI     ] = i_ori;
+    primary_table[Opcode::OPCODE_XORI    ] = i_xori;
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
