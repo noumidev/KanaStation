@@ -14,6 +14,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/edram.hpp>
@@ -53,6 +54,7 @@ void initialize(const Configuration config) {
         exit(1);
     }
 
+    scheduler::initialize();
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::edram::initialize();
@@ -78,6 +80,7 @@ void initialize(const Configuration config) {
 
 void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
+    scheduler::soft_reset();
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
     hw::edram::soft_reset();
@@ -95,6 +98,7 @@ void soft_reset() {
 
 void hard_reset() {
     // This should hard reset all components (including memory)
+    scheduler::hard_reset();
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
     hw::edram::hard_reset();
@@ -112,6 +116,7 @@ void hard_reset() {
 
 void shutdown() {
     // This shuts down all components
+    scheduler::shutdown();
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
     hw::edram::shutdown();
@@ -129,11 +134,8 @@ hw::allegrex::Allegrex* get_sc_ptr() {
 }
 
 void run() {
-    while (true) {
-        // This will be set by a scheduler later on
-        *sc.get_cycles() = 128;
-
-        hw::allegrex::interpreter::run(&sc);
+    while (scheduler::run()) {
+        
     }
 }
 
