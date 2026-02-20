@@ -16,8 +16,9 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#include <common/types.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/syscon.hpp>
 
 namespace kanacore::hw::spi {
 
@@ -34,6 +35,8 @@ enum IoAddress {
     IO_ADDRESS_DATA     = SPI_ADDR + 0x008,
     IO_ADDRESS_STATUS   = SPI_ADDR + 0x00C,
     IO_ADDRESS_INTRMASK = SPI_ADDR + 0x014,
+    IO_ADDRESS_RAWISTAT = SPI_ADDR + 0x018,
+    IO_ADDRESS_INTRSTAT = SPI_ADDR + 0x01C,
     IO_ADDRESS_INTRCLR  = SPI_ADDR + 0x020,
     IO_ADDRESS_DMACTRL  = SPI_ADDR + 0x024,
 };
@@ -43,10 +46,17 @@ enum IoAddress {
 #define HW_SPI_CONTROL1 ctx.control.raw[1]
 #define HW_SPI_STATUS   ctx.status
 #define HW_SPI_INTRMASK ctx.interrupt_mask
+#define HW_SPI_RAWISTAT ctx.raw_interrupt_status
+#define HW_SPI_INTRSTAT ctx.interrupt_status
 #define HW_SPI_DMACTRL  ctx.dma_control
 
 enum FrameFormat {
     FRAME_FORMAT_MOTOROLA,
+};
+
+enum SpiInterrupt {
+    SPI_INTERRUPT_RX_HALF_FULL  = 2,
+    SPI_INTERRUPT_TX_HALF_EMPTY = 3,
 };
 
 static struct {
@@ -81,6 +91,8 @@ static struct {
     } status;
 
     u16 interrupt_mask;
+    u16 raw_interrupt_status;
+    u16 interrupt_status;
 
     union {
         u16 raw;
@@ -99,11 +111,58 @@ static std::queue<u16> transmit_fifo;
 static std::queue<u16> receive_fifo;
 
 static inline void update_fifo_status() {
-    HW_SPI_STATUS.transmit_empty    = transmit_fifo.size() == 0;
+    HW_SPI_STATUS.transmit_empty    = transmit_fifo.empty();
     HW_SPI_STATUS.transmit_not_full = transmit_fifo.size() != FIFO_SIZE;
 
-    HW_SPI_STATUS.receive_not_empty = receive_fifo.size() != 0;
+    HW_SPI_STATUS.receive_not_empty = !receive_fifo.empty();
     HW_SPI_STATUS.receive_full      = receive_fifo.size() == FIFO_SIZE;
+
+    if (transmit_fifo.size() <= (FIFO_SIZE / 2)) {
+        // TX half empty interrupt
+        HW_SPI_RAWISTAT |= 1 << SpiInterrupt::SPI_INTERRUPT_TX_HALF_EMPTY;
+    } else {
+        HW_SPI_RAWISTAT &= ~(1 << SpiInterrupt::SPI_INTERRUPT_TX_HALF_EMPTY);
+    }
+
+    if (receive_fifo.size() >= (FIFO_SIZE / 2)) {
+        // RX half full interrupt
+        HW_SPI_RAWISTAT |= 1 << SpiInterrupt::SPI_INTERRUPT_RX_HALF_FULL;
+    } else {
+        HW_SPI_RAWISTAT &= ~(1 << SpiInterrupt::SPI_INTERRUPT_RX_HALF_FULL);
+    }
+
+    HW_SPI_INTRSTAT = HW_SPI_RAWISTAT & HW_SPI_INTRMASK;
+}
+
+static void transmit_data(const int) {
+    assert(!transmit_fifo.empty());
+    assert(HW_SPI_CONTROL.serial_enable);
+
+    const u16 data = transmit_fifo.front(); transmit_fifo.pop();
+
+    if (!transmit_fifo.empty()) {
+        // Repeat transmission
+        logger->debug("Continuing transmission");
+
+        scheduler::schedule_event("SPI TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
+    } else {
+        HW_SPI_STATUS.busy = false;
+    }
+
+    syscon::receive(data);
+
+    update_fifo_status();
+}
+
+static void start_transmission() {
+    assert(!transmit_fifo.empty());
+    assert(HW_SPI_CONTROL.serial_enable);
+
+    logger->debug("Starting transmission");
+
+    HW_SPI_STATUS.busy = true;
+
+    scheduler::schedule_event("SPI TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
 }
 
 static u32 read(const u32 addr) {
@@ -111,6 +170,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
             return HW_SPI_STATUS.raw;
+        case IoAddress::IO_ADDRESS_RAWISTAT:
+            logger->debug("RAWISTAT read32");
+            return HW_SPI_RAWISTAT;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -123,6 +185,10 @@ static void write_transmit_fifo(const u16 data) {
     transmit_fifo.push(data);
 
     update_fifo_status();
+
+    if (HW_SPI_CONTROL.serial_enable) {
+        start_transmission();
+    }
 }
 
 static void write(const u32 addr, const u32 data) {
@@ -143,6 +209,10 @@ static void write(const u32 addr, const u32 data) {
             assert(!HW_SPI_CONTROL.loop_back_mode);
             assert(HW_SPI_CONTROL.slave_mode);
             assert(!HW_SPI_CONTROL.slave_output_disable);
+
+            if (HW_SPI_CONTROL.serial_enable && !HW_SPI_STATUS.busy && !transmit_fifo.empty()) {
+                start_transmission();
+            }
             break;
         case IoAddress::IO_ADDRESS_DATA:
             logger->debug("DATA write32 = {:08X}", data);
@@ -156,7 +226,10 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_INTRCLR:
             logger->debug("INTRCLR write32 = {:08X}", data);
             
-            // This should clear the receive overrun and timeout interrupts
+            // Clear FIFO overrun/timeout interrupts
+            // Use named constants for this
+            HW_SPI_RAWISTAT &= ~3;
+            HW_SPI_INTRSTAT &= ~3;
             break;
         case IoAddress::IO_ADDRESS_DMACTRL:
             logger->debug("DMACTRL write32 = {:08X}", data);
@@ -197,6 +270,40 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+void start_reception() {
+    assert(receive_fifo.size() < FIFO_SIZE);
+    assert(HW_SPI_CONTROL.serial_enable);
+    assert(!HW_SPI_STATUS.busy);
+
+    logger->debug("Starting reception");
+
+    HW_SPI_STATUS.busy = true;
+}
+
+void end_reception() {
+    assert(HW_SPI_CONTROL.serial_enable);
+    assert(HW_SPI_STATUS.busy);
+
+    logger->debug("Ending reception");
+
+    HW_SPI_STATUS.busy = false;
+
+    if (!transmit_fifo.empty()) {
+        start_transmission();
+    }
+}
+
+void receive(const u16 data) {
+    assert(receive_fifo.size() < FIFO_SIZE);
+    assert(HW_SPI_CONTROL.serial_enable);
+
+    logger->debug("Receiving data {:04X}", data);
+
+    receive_fifo.push(data);
+
+    update_fifo_status();
 }
 
 };
