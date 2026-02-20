@@ -15,8 +15,8 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#include <common/types.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/syscon.hpp>
 #include <core/hw/sysctrl.hpp>
 
 namespace kanacore::hw::gpio {
@@ -26,16 +26,14 @@ using namespace common;
 constexpr u64 GPIO_ADDR = 0x1E240000;
 constexpr u64 GPIO_SIZE = 0x1000;
 
-constexpr u64 NUM_PINS = 32;
-
 enum IoAddress {
     IO_ADDRESS_OUTEN    = GPIO_ADDR + 0x000,
     IO_ADDRESS_READ     = GPIO_ADDR + 0x004,
     IO_ADDRESS_SET      = GPIO_ADDR + 0x008,
     IO_ADDRESS_CLEAR    = GPIO_ADDR + 0x00C,
     IO_ADDRESS_EDGEINTR = GPIO_ADDR + 0x010,
-    IO_ADDRESS_RISEINTR = GPIO_ADDR + 0x014,
-    IO_ADDRESS_FALLINTR = GPIO_ADDR + 0x018,
+    IO_ADDRESS_FALLINTR = GPIO_ADDR + 0x014,
+    IO_ADDRESS_RISEINTR = GPIO_ADDR + 0x018,
     IO_ADDRESS_INTRMASK = GPIO_ADDR + 0x01C,
     IO_ADDRESS_INTRSTAT = GPIO_ADDR + 0x020,
     IO_ADDRESS_INTRCLR  = GPIO_ADDR + 0x024,
@@ -44,17 +42,19 @@ enum IoAddress {
 
 #define HW_GPIO_OUTEN    ctx.output_enable
 #define HW_GPIO_EDGEINTR ctx.edge_interrupt_enable
-#define HW_GPIO_RISEINTR ctx.rising_edge_enable
 #define HW_GPIO_FALLINTR ctx.falling_edge_enable
+#define HW_GPIO_RISEINTR ctx.rising_edge_enable
 #define HW_GPIO_INTRMASK ctx.interrupt_mask
 #define HW_GPIO_INTRSTAT ctx.interrupt_status
 #define HW_GPIO_INEN     ctx.input_enable
 
 static struct {
+    u32 inputs;
+
     u32 output_enable;
     u32 edge_interrupt_enable;
-    u32 rising_edge_enable;
     u32 falling_edge_enable;
+    u32 rising_edge_enable;
     u32 interrupt_mask;
     u32 interrupt_status;
     u32 input_enable;
@@ -62,12 +62,32 @@ static struct {
 
 static std::shared_ptr<spdlog::logger> logger;
 
+static std::array<void (*)(void), Pin::PIN_NUM> clear_funcs;
+static std::array<void (*)(void), Pin::PIN_NUM> set_funcs;
+
+static const char* get_pin_name(const u32 pin) {
+    switch (pin) {
+        case Pin::PIN_SYSCON_NOTIFY:
+            return "SYSCON_NOTIFY";
+        case Pin::PIN_SYSCON_ACKNOWLEDGE:
+            return "SYSCON_ACKNOWLEDGE";
+        default:
+            return "N/A";
+    }
+}
+
 static void clear_pins(const u32 data) {
     const u32 gpio_enable = sysctrl::get_gpio_enable();
 
-    for (u32 i = 0; i < NUM_PINS; i++) {
+    for (u32 i = 0; i < Pin::PIN_NUM; i++) {
         if ((data & gpio_enable & HW_GPIO_OUTEN & (1 << i)) != 0) {
-            logger->warn("Unimplemented pin {} clear", i);
+            logger->debug("Clearing pin {}", get_pin_name(i));
+
+            if (clear_funcs[i] != nullptr) {
+                clear_funcs[i]();
+            } else {
+                logger->warn("No clear handler installed for pin {}", i);
+            }
         }
     }
 }
@@ -77,11 +97,11 @@ static u32 read_pins() {
 
     u32 data = 0;
 
-    for (u32 i = 0; i < NUM_PINS; i++) {
+    for (u32 i = 0; i < Pin::PIN_NUM; i++) {
         if ((gpio_enable & HW_GPIO_INEN & (1 << i)) != 0) {
-            logger->warn("Unimplemented pin {} read", i);
+            logger->debug("Reading pin {}", get_pin_name(i));
 
-            data |= 0 << i;
+            data |= ctx.inputs << i;
         }
     }
 
@@ -91,9 +111,15 @@ static u32 read_pins() {
 static void set_pins(const u32 data) {
     const u32 gpio_enable = sysctrl::get_gpio_enable();
 
-    for (u32 i = 0; i < NUM_PINS; i++) {
+    for (u32 i = 0; i < Pin::PIN_NUM; i++) {
         if ((data & gpio_enable & HW_GPIO_OUTEN & (1 << i)) != 0) {
-            logger->warn("Unimplemented pin {} set", i);
+            logger->debug("Setting pin {}", get_pin_name(i));
+
+            if (set_funcs[i] != nullptr) {
+                set_funcs[i]();
+            } else {
+                logger->warn("No set handler installed for pin {}", i);
+            }
         }
     }
 }
@@ -179,6 +205,12 @@ static void write(const u32 addr, const u32 data) {
 void initialize() {
     logger = spdlog::stdout_color_st("GPIO");
 
+    clear_funcs.fill(nullptr);
+    clear_funcs[Pin::PIN_SYSCON_NOTIFY] = syscon::clear_notify;
+
+    set_funcs.fill(nullptr);
+    set_funcs[Pin::PIN_SYSCON_NOTIFY] = syscon::set_notify;
+
     std::memset(&ctx, 0, sizeof(ctx));
 }
 
@@ -198,6 +230,42 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+void clear_pin(const u32 pin) {
+    assert(pin < Pin::PIN_NUM);
+
+    logger->debug("Clearing pin {}", get_pin_name(pin));
+
+    const u32 old_pin = (ctx.inputs >> pin) & 1;
+
+    ctx.inputs &= ~(1 << pin);
+
+    if ((HW_GPIO_INTRMASK & HW_GPIO_FALLINTR & (1 << pin)) != 0) {
+        const bool is_edge_triggered = (HW_GPIO_EDGEINTR & (1 << pin)) != 0;
+    
+        if ((is_edge_triggered && old_pin) || !is_edge_triggered) {
+            HW_GPIO_INTRSTAT |= 1 << pin;
+        }
+    }
+}
+
+void set_pin(const u32 pin) {
+    assert(pin < Pin::PIN_NUM);
+
+    logger->debug("Setting pin {}", get_pin_name(pin));
+
+    const u32 old_pin = (ctx.inputs >> pin) & 1;
+
+    ctx.inputs |= 1 << pin;
+
+    if ((HW_GPIO_INTRMASK & HW_GPIO_RISEINTR & (1 << pin)) != 0) {
+        const bool is_edge_triggered = (HW_GPIO_EDGEINTR & (1 << pin)) != 0;
+    
+        if ((is_edge_triggered && !old_pin) || !is_edge_triggered) {
+            HW_GPIO_INTRSTAT |= 1 << pin;
+        }
+    }
 }
 
 };
