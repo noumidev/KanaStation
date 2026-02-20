@@ -23,6 +23,7 @@
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
 #include <core/hw/spi.hpp>
+#include <core/hw/syscon.hpp>
 #include <core/hw/sysctrl.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
@@ -63,6 +64,7 @@ void initialize(const Configuration config) {
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
     hw::spi::initialize();
+    hw::syscon::initialize();
     hw::sysctrl::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
@@ -89,6 +91,7 @@ void soft_reset() {
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
     hw::spi::soft_reset();
+    hw::syscon::soft_reset();
     hw::sysctrl::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
@@ -107,6 +110,7 @@ void hard_reset() {
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
     hw::spi::hard_reset();
+    hw::syscon::hard_reset();
     hw::sysctrl::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
@@ -124,6 +128,7 @@ void shutdown() {
     hw::nand::shutdown();
     hw::shared_ram::shutdown();
     hw::spi::shutdown();
+    hw::syscon::shutdown();
     hw::sysctrl::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
@@ -135,7 +140,7 @@ hw::allegrex::Allegrex* get_sc_ptr() {
 
 void run() {
     while (scheduler::run()) {
-        
+
     }
 }
 
