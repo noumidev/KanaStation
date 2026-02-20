@@ -18,6 +18,8 @@ constexpr common::i64 SCHEDULER_CLOCKRATE = 2 * BUS_CLOCKRATE + 1;
 
 constexpr common::i64 ONE_MICROSECOND = SCHEDULER_CLOCKRATE / 1000 / 1000;
 
+constexpr common::i64 SPI_CLOCKRATE = 2 * ONE_MICROSECOND;
+
 void initialize();
 void soft_reset();
 void hard_reset();
