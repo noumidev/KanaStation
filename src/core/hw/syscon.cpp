@@ -26,7 +26,8 @@ using namespace common;
 constexpr u64 BUFFER_SIZE = 16;
 
 enum SysconCommand {
-    SYSCON_COMMAND_GET_BARYON_VERSION = 0x01,
+    SYSCON_COMMAND_GET_BARYON_VERSION   = 0x01,
+    SYSCON_COMMAND_GET_BARYON_TIMESTAMP = 0x11,
 };
 
 enum BufferIndex {
@@ -52,7 +53,7 @@ static struct {
 } receive_buffer, transmit_buffer;
 
 static inline u8 calculate_checksum(const u8* buf, const u64 size) {
-    assert((size < (BUFFER_SIZE - 1)) && (buf[BufferIndex::BUFFER_INDEX_SIZE] == size));
+    assert((size < BUFFER_SIZE) && (buf[BufferIndex::BUFFER_INDEX_SIZE] == size));
 
     u8 checksum = 0;
 
@@ -95,7 +96,7 @@ static void start_transmission() {
 }
 
 static void write_transmit_data(const u8* data, const u64 size) {
-    assert((size + BufferIndex::BUFFER_INDEX_TRANSMIT_DATA) < (BUFFER_SIZE - 1));
+    assert((size + BufferIndex::BUFFER_INDEX_TRANSMIT_DATA) < BUFFER_SIZE);
 
     u8* buf = transmit_buffer.buf;
 
@@ -103,6 +104,14 @@ static void write_transmit_data(const u8* data, const u64 size) {
 
     // Set the response buffer size
     buf[BufferIndex::BUFFER_INDEX_SIZE] = size + 3;
+}
+
+static void command_get_baryon_timestamp() {
+    constexpr const char* BARYON_TIMESTAMP = "200509260441";
+
+    logger->debug("GET_BARYON_TIMESTAMP");
+
+    write_transmit_data((u8*)BARYON_TIMESTAMP, std::strlen(BARYON_TIMESTAMP));
 }
 
 static void command_get_baryon_version() {
@@ -129,6 +138,9 @@ static void start_command() {
     switch (command) {
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_VERSION:
             command_get_baryon_version();
+            break;
+        case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
+            command_get_baryon_timestamp();
             break;
         default:
             logger->error("Unimplemented command {:02X} (size: {})", command, size);
