@@ -60,6 +60,7 @@ enum IoAddress {
 #define HW_NAND_DMAINTR ctx.dma.interrupt
 
 enum NandCommand {
+    NAND_COMMAND_READ_SPARE  = 0x50,
     NAND_COMMAND_READ_STATUS = 0x70,
     NAND_COMMAND_READ_ID     = 0x90,
     NAND_COMMAND_RESET       = 0xFF,
@@ -68,6 +69,12 @@ enum NandCommand {
 enum DmaDirection {
     DMA_DIRECTION_TO_RAM,
     DMA_DIRECTION_TO_NAND,
+};
+
+enum NandState {
+    NAND_STATE_IDLE,
+    NAND_STATE_READ_ID,
+    NAND_STATE_READ_SPARE,
 };
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -119,6 +126,8 @@ static struct {
 
 static std::array<u8, NAND_SIZE> nand;
 
+static NandState state;
+
 // Ring buffer used for various NAND commands ("serial data")
 static struct {
 private:
@@ -128,6 +137,11 @@ private:
     u64 size;
 
     u8 get_byte() {
+        if (size == 0) {
+            // This is to handle invalid commands
+            return 0;
+        }
+
         const u8 data = buf[read_ptr++];
 
         if (read_ptr >= size) {
@@ -179,6 +193,13 @@ static void reset_nand_chip() {
 // Writing to the NAND interface RESET register does this
 static void reset_nand_interface() {
     // Does this reset the chip?
+    state = NandState::NAND_STATE_IDLE;
+}
+
+static void command_read_spare() {
+    logger->debug("READ_SPARE (page: {:04X})", HW_NAND_PAGE);
+
+    nand_buffer.set(nand.data() + HW_NAND_PAGE * PAGE_SIZE_WITH_ECC + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
 }
 
 static void command_read_status() {
@@ -194,12 +215,20 @@ static void command_read_id() {
     constexpr u16 NAND_ID = 0x35EC;
 
     logger->debug("READ_ID");
-    
-    // The NAND manual says the chip ID is two bytes long, but my tests suggest
-    // this command actually returns five bytes.
-    // On my PSP-2000, this returns 0xEC 0x36 0x5A 0x3F 0x74. Nevertheless,
-    // until I know what this returns on my PSP-1000, we will return two bytes here
-    nand_buffer.set((u8*)&NAND_ID, sizeof(NAND_ID));
+
+    // This absolutely needs to be 0 from what I've seen on hardware.
+    // Otherwise, this command returns all 0s
+    if (HW_NAND_PAGE == 0) {
+        // The NAND manual says the chip ID is two bytes long, but my tests suggest
+        // this command actually returns five bytes.
+        // On my PSP-2000, this returns 0xEC 0x36 0x5A 0x3F 0x74. Nevertheless,
+        // until I know what this returns on my PSP-1000, we will return two bytes here
+        nand_buffer.set((u8*)&NAND_ID, sizeof(NAND_ID));
+    } else {
+        logger->warn("NAND address is not 0");
+        
+        nand_buffer.set(nullptr, 0);
+    }
 }
 
 static void command_reset() {
@@ -214,12 +243,16 @@ static void start_command(const u32 command) {
     assert(HW_NAND_STATUS.ready);
 
     switch (command) {
+        case NandCommand::NAND_COMMAND_READ_SPARE:
+            // This needs a NAND address
+            state = NandState::NAND_STATE_READ_SPARE;
+            break;
         case NandCommand::NAND_COMMAND_READ_STATUS:
             command_read_status();
             break;
         case NandCommand::NAND_COMMAND_READ_ID:
-            // Technically "needs" a NAND address, but we can ignore this for now
-            command_read_id();
+            // This "needs" a NAND address of 0
+            state = NandState::NAND_STATE_READ_ID;
             break;
         case NandCommand::NAND_COMMAND_RESET:
             command_reset();
@@ -341,6 +374,21 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("PAGE write32 = {:08X}", data);
 
             HW_NAND_PAGE = data >> 10;
+
+            switch (state) {
+                case NandState::NAND_STATE_IDLE:
+                    logger->warn("PAGE write in IDLE state");
+                    break;
+                case NandState::NAND_STATE_READ_ID:
+                    command_read_id();
+                    break;
+                case NandState::NAND_STATE_READ_SPARE:
+                    command_read_spare();
+                    break;
+            }
+
+            // As far as I care for now, all commands return to IDLE state here
+            state = NandState::NAND_STATE_IDLE;
             break;
         case IoAddress::IO_ADDRESS_RESET:
             logger->debug("RESET write32 = {:08X}", data);
