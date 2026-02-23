@@ -165,8 +165,21 @@ static void start_transmission() {
     scheduler::schedule_event("SPI TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
 }
 
+static u32 read_receive_fifo() {
+    assert(!receive_fifo.empty());
+
+    const u32 data = receive_fifo.front(); receive_fifo.pop();
+
+    update_fifo_status();
+
+    return data;
+}
+
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_DATA:
+            logger->debug("DATA read32");
+            return read_receive_fifo();
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
             return HW_SPI_STATUS.raw;
