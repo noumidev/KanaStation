@@ -28,6 +28,7 @@ constexpr u64 BUFFER_SIZE = 16;
 enum SysconCommand {
     SYSCON_COMMAND_GET_BARYON_VERSION   = 0x01,
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP = 0x11,
+    SYSCON_COMMAND_GET_POWER_STATUS     = 0x46,
 };
 
 enum BufferIndex {
@@ -106,6 +107,25 @@ static void write_transmit_data(const u8* data, const u64 size) {
     buf[BufferIndex::BUFFER_INDEX_SIZE] = size + 3;
 }
 
+static void common_read(const u8 command) {
+    u32 data;
+
+    switch (command) {
+        case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
+            logger->debug("GET_POWER_STATUS");
+
+            // I don't yet know what this is. This appears to return the power status
+            // for certain peripherals, but I dunno why SYSCON has access to this
+            data = 0;
+            break;
+        default:
+            logger->error("Unhandled common read for command {:02X}", command);
+            exit(1);
+    }
+
+    write_transmit_data((u8*)&data, sizeof(data));
+}
+
 static void command_get_baryon_timestamp() {
     constexpr const char* BARYON_TIMESTAMP = "200509260441";
 
@@ -141,6 +161,9 @@ static void start_command() {
             break;
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
             command_get_baryon_timestamp();
+            break;
+        case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
+            common_read(command);
             break;
         default:
             logger->error("Unimplemented command {:02X} (size: {})", command, size);
