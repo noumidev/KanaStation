@@ -154,7 +154,13 @@ private:
 public:
     // Returns 32 bits of data at once (get_byte() handles wraparound)
     u32 get() {
-        return get_byte() | (get_byte() << 8) | (get_byte() << 16) | (get_byte() << 24);
+        u32 data = get_byte();
+
+        data |= get_byte() << 8;
+        data |= get_byte() << 16;
+        data |= get_byte() << 24;
+
+        return data;
     }
 
     // Sets the buffer to be read
@@ -212,7 +218,8 @@ static void command_read_status() {
 }
 
 static void command_read_id() {
-    constexpr u16 NAND_ID = 0x35EC;
+    // Every ID byte is padded to 32-bit
+    constexpr u32 NAND_ID[] = {0xEC, 0x35};
 
     logger->debug("READ_ID");
 
@@ -302,6 +309,9 @@ static void start_dma() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_COMMAND:
+            logger->debug("STATUS read32");
+            return HW_NAND_STATUS.raw;
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
             return HW_NAND_STATUS.raw;
