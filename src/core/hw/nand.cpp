@@ -41,6 +41,7 @@ constexpr u64 NUM_BLOCKS = 2048;
 constexpr u64 NAND_SIZE  = NUM_BLOCKS * BLOCK_SIZE;
 
 enum IoAddress {
+    IO_ADDRESS_CONTROL = NAND_INTERFACE_ADDR + 0x000,
     IO_ADDRESS_STATUS  = NAND_INTERFACE_ADDR + 0x004,
     IO_ADDRESS_COMMAND = NAND_INTERFACE_ADDR + 0x008,
     IO_ADDRESS_PAGE    = NAND_INTERFACE_ADDR + 0x00C,
@@ -53,6 +54,7 @@ enum IoAddress {
     IO_ADDRESS_SERIAL  = NAND_INTERFACE_ADDR + 0x300,
 };
 
+#define HW_NAND_CONTROL ctx.control
 #define HW_NAND_STATUS  ctx.status
 #define HW_NAND_PAGE    ctx.page
 #define HW_NAND_DMAPAGE ctx.dma.page
@@ -80,6 +82,17 @@ enum NandState {
 static std::shared_ptr<spdlog::logger> logger;
 
 static struct {
+    union {
+        u32 raw;
+
+        struct {
+            u32                   : 16;
+            u32 auto_ecc_on_read  : 1;
+            u32 auto_ecc_on_write : 1;
+            u32                   : 14;
+        };
+    } control;
+
     // NAND interface status register
     union {
         u8 raw;
@@ -273,6 +286,13 @@ static void start_command(const u32 command) {
     HW_NAND_STATUS.ready = true;
 }
 
+static void assert_dma_interrupt(const bool is_write) {
+    // I'm not very sure if it works like this, this register behaves very weird.
+    // This does make the NAND driver happy, at least
+    HW_NAND_DMAINTR.other = 0x3;
+    HW_NAND_DMAINTR.flags = 1 << is_write;
+}
+
 static void start_dma() {
     const bool is_write = HW_NAND_DMACTRL.direction == DmaDirection::DMA_DIRECTION_TO_NAND;
 
@@ -303,15 +323,17 @@ static void start_dma() {
         std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
     }
 
+    assert_dma_interrupt(is_write);
+
     // TODO: delay command completion
     HW_NAND_DMACTRL.busy = false;
 }
 
 static u32 read(const u32 addr) {
     switch (addr) {
-        case IoAddress::IO_ADDRESS_COMMAND:
-            logger->debug("STATUS read32");
-            return HW_NAND_STATUS.raw;
+        case IoAddress::IO_ADDRESS_CONTROL:
+            logger->debug("CONTROL read32");
+            return HW_NAND_CONTROL.raw;
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
             return HW_NAND_STATUS.raw;
@@ -369,6 +391,11 @@ static u32 read_dma_buffer(const u32 addr) {
 
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_CONTROL:
+            logger->debug("CONTROL write32 = {:08X}", data);
+            
+            HW_NAND_CONTROL.raw = data;
+            break;
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS write32 = {:08X}", data);
 
