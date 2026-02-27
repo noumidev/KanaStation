@@ -45,6 +45,7 @@ enum Opcode {
     OPCODE_BNE      = 0x05,
     OPCODE_BLEZ     = 0x06,
     OPCODE_BGTZ     = 0x07,
+    OPCODE_ADDI     = 0x08,
     OPCODE_ADDIU    = 0x09,
     OPCODE_SLTI     = 0x0A,
     OPCODE_SLTIU    = 0x0B,
@@ -58,12 +59,16 @@ enum Opcode {
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LB       = 0x20,
     OPCODE_LH       = 0x21,
+    OPCODE_LWL      = 0x22,
     OPCODE_LW       = 0x23,
     OPCODE_LBU      = 0x24,
     OPCODE_LHU      = 0x25,
+    OPCODE_LWR      = 0x26,
     OPCODE_SB       = 0x28,
     OPCODE_SH       = 0x29,
+    OPCODE_SWL      = 0x2A,
     OPCODE_SW       = 0x2B,
+    OPCODE_SWR      = 0x2E,
     OPCODE_CACHE    = 0x2F,
 };
 
@@ -73,6 +78,7 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_SRA  = 0x03,
     SPECIAL_OPCODE_SLLV = 0x04,
     SPECIAL_OPCODE_SRLV = 0x06,
+    SPECIAL_OPCODE_SRAV = 0x07,
     SPECIAL_OPCODE_JR   = 0x08,
     SPECIAL_OPCODE_JALR = 0x09,
     SPECIAL_OPCODE_MOVZ = 0x0A,
@@ -100,7 +106,9 @@ enum Special3Opcode {
 enum RegimmOpcode {
     REGIMM_OPCODE_BLTZ   = 0x00,
     REGIMM_OPCODE_BGEZ   = 0x01,
+    REGIMM_OPCODE_BLTZL  = 0x02,
     REGIMM_OPCODE_BLTZAL = 0x10,
+    REGIMM_OPCODE_BGEZAL = 0x11,
 };
 
 enum CopOpcode {
@@ -110,6 +118,7 @@ enum CopOpcode {
 };
 
 enum BitShuffleOpcode {
+    BIT_SHUFFLE_OPCODE_SEB    = 0x10,
     BIT_SHUFFLE_OPCODE_BITREV = 0x14,
 };
 
@@ -119,6 +128,9 @@ enum CopNum {
 
 static std::array<Instruction, PRIMARY_TABLE_SIZE> primary_table;
 static std::array<Instruction, SPECIAL_TABLE_SIZE> special_table;
+
+// Is identical to ADDIU as far as I remember, so...
+// static i64 i_addi(Allegrex* cpu, const u32 instr) { ... }
 
 static i64 i_addiu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->get_reg(RS) + (i32)(i16)UIMM);
@@ -155,6 +167,11 @@ static i64 i_bgez(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_bgezal(Allegrex* cpu, const u32 instr) {
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) >= 0, 31);
+    return 1;
+}
+
 static i64 i_bgtz(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) > 0, 0);
     return 1;
@@ -185,6 +202,11 @@ static i64 i_bltz(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bltzal(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) < 0, 31);
+    return 1;
+}
+
+static i64 i_bltzl(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) < 0, 0);
     return 1;
 }
 
@@ -288,6 +310,22 @@ static i64 i_lw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_lwl(Allegrex* cpu, const u32 instr) {
+    const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
+    const u32 shift = 24 - 8 * (addr & 3);
+
+    cpu->set_reg(RT, (cpu->get_reg(RT) & ~(0xFFFFFFFFU << shift)) | (cpu->read<u32>(addr & ~3) << shift));
+    return 1;
+}
+
+static i64 i_lwr(Allegrex* cpu, const u32 instr) {
+    const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
+    const u32 shift = 8 * (addr & 3);
+
+    cpu->set_reg(RT, (cpu->get_reg(RT) & ~(0xFFFFFF00U << (24 - shift))) | (cpu->read<u32>(addr & ~3) >> shift));
+    return 1;
+}
+
 static i64 i_max(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, std::max((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
     return 1;
@@ -361,6 +399,11 @@ static i64 i_sb(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_seb(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, (i32)(i8)cpu->get_reg(RT));
+    return 1;
+}
+
 static i64 i_sh(Allegrex* cpu, const u32 instr) {
     cpu->write<u16>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u16)cpu->get_reg(RT));
     return 1;
@@ -387,7 +430,7 @@ static i64 i_slti(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_sltiu(Allegrex* cpu, const u32 instr) {
-    cpu->set_reg(RT, cpu->get_reg(RS) < UIMM);
+    cpu->set_reg(RT, cpu->get_reg(RS) < (u32)(i16)UIMM);
     return 1;
 }
 
@@ -398,6 +441,11 @@ static i64 i_sltu(Allegrex* cpu, const u32 instr) {
 
 static i64 i_sra(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, (i32)cpu->get_reg(RT) >> SA);
+    return 1;
+}
+
+static i64 i_srav(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, (i32)cpu->get_reg(RT) >> (cpu->get_reg(RS) & 0x1F));
     return 1;
 }
 
@@ -421,6 +469,22 @@ static i64 i_sw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_swl(Allegrex* cpu, const u32 instr) {
+    const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
+    const u32 shift = 8 * (addr & 3);
+
+    cpu->write<u32>(addr & ~3, (cpu->read<u32>(addr & ~3) & (0xFFFFFF00U << shift)) | (cpu->get_reg(RT) >> (24 - shift)));
+    return 1;
+}
+
+static i64 i_swr(Allegrex* cpu, const u32 instr) {
+    const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
+    const u32 shift = 8 * (addr & 3);
+
+    cpu->write<u32>(addr & ~3, (cpu->read<u32>(addr & ~3) & ~(0xFFFFFFFFU << shift)) | (cpu->get_reg(RT) << shift));
+    return 1;
+}
+
 static i64 i_sync(Allegrex*, const u32) {
     return 1;
 }
@@ -437,6 +501,8 @@ static i64 i_xori(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bit_shuffle(Allegrex* cpu, const u32 instr) {
     switch (SA) {
+        case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_SEB:
+            return i_seb(cpu, instr);
         case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_BITREV:
             return i_bitrev(cpu, instr);
         default:
@@ -480,8 +546,12 @@ static i64 i_regimm(Allegrex* cpu, const u32 instr) {
             return i_bltz(cpu, instr);
         case RegimmOpcode::REGIMM_OPCODE_BGEZ:
             return i_bgez(cpu, instr);
+        case RegimmOpcode::REGIMM_OPCODE_BLTZL:
+            return i_bltzl(cpu, instr);
         case RegimmOpcode::REGIMM_OPCODE_BLTZAL:
             return i_bltzal(cpu, instr);
+        case RegimmOpcode::REGIMM_OPCODE_BGEZAL:
+            return i_bgezal(cpu, instr);
         default:
             cpu->get_logger()->error("Undefined REGIMM instruction {:02X} ({:08X}) @ {:08X}", RT, instr, cpu->get_instr_addr());
             cpu->dump_state();
@@ -552,6 +622,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_BNE     ] = i_bne;
     primary_table[Opcode::OPCODE_BLEZ    ] = i_blez;
     primary_table[Opcode::OPCODE_BGTZ    ] = i_bgtz;
+    primary_table[Opcode::OPCODE_ADDI    ] = i_addiu;
     primary_table[Opcode::OPCODE_ADDIU   ] = i_addiu;
     primary_table[Opcode::OPCODE_SLTI    ] = i_slti;
     primary_table[Opcode::OPCODE_SLTIU   ] = i_sltiu;
@@ -565,12 +636,16 @@ void initialize() {
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
     primary_table[Opcode::OPCODE_LH      ] = i_lh;
+    primary_table[Opcode::OPCODE_LWL     ] = i_lwl;
     primary_table[Opcode::OPCODE_LW      ] = i_lw;
     primary_table[Opcode::OPCODE_LBU     ] = i_lbu;
     primary_table[Opcode::OPCODE_LHU     ] = i_lhu;
+    primary_table[Opcode::OPCODE_LWR     ] = i_lwr;
     primary_table[Opcode::OPCODE_SB      ] = i_sb;
     primary_table[Opcode::OPCODE_SH      ] = i_sh;
+    primary_table[Opcode::OPCODE_SWL     ] = i_swl;
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
+    primary_table[Opcode::OPCODE_SWR     ] = i_swr;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
 
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLL ] = i_sll;
@@ -578,6 +653,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_SRA ] = i_sra;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV] = i_sllv;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV] = i_shift_right_variable;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRAV] = i_srav;
     special_table[SpecialOpcode::SPECIAL_OPCODE_JR  ] = i_jr;
     special_table[SpecialOpcode::SPECIAL_OPCODE_JALR] = i_jalr;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ] = i_movz;
