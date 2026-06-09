@@ -26,9 +26,13 @@ using namespace common;
 constexpr u64 BUFFER_SIZE = 16;
 
 enum SysconCommand {
-    SYSCON_COMMAND_GET_BARYON_VERSION   = 0x01,
-    SYSCON_COMMAND_GET_BARYON_TIMESTAMP = 0x11,
-    SYSCON_COMMAND_GET_POWER_STATUS     = 0x46,
+    SYSCON_COMMAND_GET_BARYON_VERSION     = 0x01,
+    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY = 0x07,
+    SYSCON_COMMAND_GET_WAKE_UP_FACTOR     = 0x0E,
+    SYSCON_COMMAND_GET_BARYON_TIMESTAMP   = 0x11,
+    SYSCON_COMMAND_SEND_SETPARAM          = 0x25,
+    SYSCON_COMMAND_CTRL_TACHYON_WDT       = 0x31,
+    SYSCON_COMMAND_GET_POWER_STATUS       = 0x46,
 };
 
 enum BufferIndex {
@@ -111,6 +115,19 @@ static void common_read(const u8 command) {
     u32 data;
 
     switch (command) {
+        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
+            logger->debug("GET_KERNEL_DIGITAL_KEY");
+            
+            // All buttons unpressed
+            data = 0xFFEF7FFF;
+            break;
+        case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
+            logger->debug("GET_WAKE_UP_FACTOR");
+            
+            // I don't know what this is. After boot, this value is 0x4C0, but IPL crashes
+            // if bit 7 is set.
+            data = 0x440;
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             logger->debug("GET_POWER_STATUS");
 
@@ -124,6 +141,40 @@ static void common_read(const u8 command) {
     }
 
     write_transmit_data((u8*)&data, sizeof(data));
+}
+
+static void common_write(const u8 command) {
+    const u8* buf = receive_buffer.buf;
+
+    i32 data = 0;
+
+    switch (buf[BufferIndex::BUFFER_INDEX_SIZE] - 2) {
+        case sizeof(i8):
+            data = (i8)buf[BufferIndex::BUFFER_INDEX_RECEIVE_DATA];
+            break;
+        case sizeof(i16):
+            std::memcpy((u8*)&data, &buf[BufferIndex::BUFFER_INDEX_RECEIVE_DATA], sizeof(i16));
+
+            data = (i16)data;
+            break;
+        case sizeof(i32):
+            std::memcpy((u8*)&data, &buf[BufferIndex::BUFFER_INDEX_RECEIVE_DATA], sizeof(i32));
+            break;
+        default:
+            logger->error("Invalid common write size");
+            exit(1);
+    }
+
+    switch (command) {
+        case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
+            logger->debug("CTRL_TACHYON_WDT: {}", data);
+            break;
+        default:
+            logger->error("Unhandled common write for command {:02X}", command);
+            exit(1);
+    }
+
+    write_transmit_data(nullptr, 0);
 }
 
 static void command_get_baryon_timestamp() {
@@ -140,6 +191,16 @@ static void command_get_baryon_version() {
     logger->debug("GET_BARYON_VERSION");
 
     write_transmit_data((u8*)&BARYON_VERSION, sizeof(BARYON_VERSION));
+}
+
+static void command_send_setparam() {
+    u64 setparam;
+
+    std::memcpy(&setparam, &receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA], sizeof(setparam));
+
+    logger->debug("SEND_SETPARAM: {:016X}", setparam);
+
+    write_transmit_data(nullptr, 0);
 }
 
 static void start_command() {
@@ -162,6 +223,14 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
             command_get_baryon_timestamp();
             break;
+        case SysconCommand::SYSCON_COMMAND_SEND_SETPARAM:
+            command_send_setparam();
+            break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
+            common_write(command);
+            break;
+        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
+        case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             common_read(command);
             break;
