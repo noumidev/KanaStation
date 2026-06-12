@@ -18,6 +18,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::nand {
@@ -62,10 +63,12 @@ enum IoAddress {
 #define HW_NAND_DMAINTR ctx.dma.interrupt
 
 enum NandCommand {
-    NAND_COMMAND_READ_SPARE  = 0x50,
-    NAND_COMMAND_READ_STATUS = 0x70,
-    NAND_COMMAND_READ_ID     = 0x90,
-    NAND_COMMAND_RESET       = 0xFF,
+    NAND_COMMAND_READ_SPARE    = 0x50,
+    NAND_COMMAND_ERASE_BLOCK   = 0x60,
+    NAND_COMMAND_READ_STATUS   = 0x70,
+    NAND_COMMAND_READ_ID       = 0x90,
+    NAND_COMMAND_CONFIRM_ERASE = 0xD0,
+    NAND_COMMAND_RESET         = 0xFF,
 };
 
 enum DmaDirection {
@@ -77,6 +80,7 @@ enum NandState {
     NAND_STATE_IDLE,
     NAND_STATE_READ_ID,
     NAND_STATE_READ_SPARE,
+    NAND_STATE_ERASE_BLOCK,
 };
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -215,6 +219,14 @@ static void reset_nand_interface() {
     state = NandState::NAND_STATE_IDLE;
 }
 
+static void command_erase_block() {
+    logger->debug("ERASE_BLOCK (page: {:04X})", HW_NAND_PAGE);
+
+    std::memset(nand.data() + HW_NAND_PAGE * PAGE_SIZE_WITH_ECC, 0xFF, BLOCK_SIZE);
+
+    state = NandState::NAND_STATE_IDLE;
+}
+
 static void command_read_spare() {
     logger->debug("READ_SPARE (page: {:04X})", HW_NAND_PAGE);
 
@@ -267,12 +279,19 @@ static void start_command(const u32 command) {
             // This needs a NAND address
             state = NandState::NAND_STATE_READ_SPARE;
             break;
+        case NandCommand::NAND_COMMAND_ERASE_BLOCK:
+            // This needs a NAND address
+            state = NandState::NAND_STATE_ERASE_BLOCK;
+            break;
         case NandCommand::NAND_COMMAND_READ_STATUS:
             command_read_status();
             break;
         case NandCommand::NAND_COMMAND_READ_ID:
             // This "needs" a NAND address of 0
             state = NandState::NAND_STATE_READ_ID;
+            break;
+        case NandCommand::NAND_COMMAND_CONFIRM_ERASE:
+            command_erase_block();
             break;
         case NandCommand::NAND_COMMAND_RESET:
             command_reset();
@@ -291,6 +310,12 @@ static void assert_dma_interrupt(const bool is_write) {
     // This does make the NAND driver happy, at least
     HW_NAND_DMAINTR.other = 0x3;
     HW_NAND_DMAINTR.flags = 1 << is_write;
+}
+
+static void end_dma(const int is_write) {
+    assert_dma_interrupt(is_write);
+
+    HW_NAND_DMACTRL.busy = false;
 }
 
 static void start_dma() {
@@ -323,10 +348,7 @@ static void start_dma() {
         std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
     }
 
-    assert_dma_interrupt(is_write);
-
-    // TODO: delay command completion
-    HW_NAND_DMACTRL.busy = false;
+    scheduler::schedule_event("NAND DMA", end_dma, is_write, scheduler::from_microseconds(60));
 }
 
 static u32 read(const u32 addr) {
@@ -338,7 +360,8 @@ static u32 read(const u32 addr) {
             logger->debug("STATUS read32");
             return HW_NAND_STATUS.raw;
         case IoAddress::IO_ADDRESS_DMACTRL:
-            logger->debug("DMACTRL read32");
+            // Commented out because the boot ROM and IPL poll this register
+            // logger->debug("DMACTRL read32");
             return HW_NAND_DMACTRL.raw;
         case IoAddress::IO_ADDRESS_DMASTAT:
             logger->debug("DMASTAT read32");
@@ -347,7 +370,8 @@ static u32 read(const u32 addr) {
             // I don't know what possible error codes look like
             return 0;
         case IoAddress::IO_ADDRESS_DMAINTR:
-            logger->debug("DMAINTR read32");
+            // Commented out because the boot ROM and IPL poll this register
+            // logger->debug("DMAINTR read32");
             return HW_NAND_DMAINTR.raw;
         case IoAddress::IO_ADDRESS_SERIAL:
             logger->debug("SERIAL read32");
@@ -421,6 +445,9 @@ static void write(const u32 addr, const u32 data) {
                     break;
                 case NandState::NAND_STATE_READ_SPARE:
                     command_read_spare();
+                    break;
+                case NandState::NAND_STATE_ERASE_BLOCK:
+                    // Erase Block is started by a different command
                     break;
             }
 
