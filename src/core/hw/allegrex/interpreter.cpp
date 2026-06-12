@@ -56,6 +56,7 @@ enum Opcode {
     OPCODE_COP0     = 0x10,
     OPCODE_BEQL     = 0x14,
     OPCODE_BNEL     = 0x15,
+    OPCODE_BLEZL    = 0x16,
     OPCODE_SPECIAL2 = 0x1C,
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LB       = 0x20,
@@ -125,6 +126,7 @@ enum RegimmOpcode {
 
 enum CopOpcode {
     COP_OPCODE_MFC = 0x00,
+    COP_OPCODE_CFC = 0x02,
     COP_OPCODE_MTC = 0x04,
     COP_OPCODE_CTC = 0x06,
 };
@@ -132,6 +134,7 @@ enum CopOpcode {
 enum BitShuffleOpcode {
     BIT_SHUFFLE_OPCODE_SEB    = 0x10,
     BIT_SHUFFLE_OPCODE_BITREV = 0x14,
+    BIT_SHUFFLE_OPCODE_SEH    = 0x18,
 };
 
 enum CopNum {
@@ -212,6 +215,11 @@ static i64 i_blez(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_blezl(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) <= 0, 0);
+    return 1;
+}
+
 static i64 i_bltz(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) < 0, 0);
     return 1;
@@ -234,6 +242,20 @@ static i64 i_bne(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bnel(Allegrex* cpu, const u32 instr) {
     cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cpu->get_reg(RS) != cpu->get_reg(RT), 0);
+    return 1;
+}
+
+template<int cop_num>
+static i64 i_cfc(Allegrex* cpu, const u32 instr) {
+    switch (cop_num) {
+        case CopNum::COP_NUM_CP0:
+            cpu->set_reg(RT, cpu->get_control_reg(RD));
+            break;
+        default:
+            cpu->get_logger()->error("Unimplemented CP{} for CFC", cop_num);
+            exit(1);
+    }
+
     return 1;
 }
 
@@ -472,6 +494,11 @@ static i64 i_seb(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_seh(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, (i32)(i16)cpu->get_reg(RT));
+    return 1;
+}
+
 static i64 i_sh(Allegrex* cpu, const u32 instr) {
     cpu->write<u16>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u16)cpu->get_reg(RT));
     return 1;
@@ -573,6 +600,8 @@ static i64 i_bit_shuffle(Allegrex* cpu, const u32 instr) {
             return i_seb(cpu, instr);
         case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_BITREV:
             return i_bitrev(cpu, instr);
+        case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_SEH:
+            return i_seh(cpu, instr);
         default:
             cpu->get_logger()->error("Undefined BSHFL instruction {:02X} ({:08X}) @ {:08X}", SA, instr, cpu->get_instr_addr());
             cpu->dump_state();
@@ -597,6 +626,8 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
     switch (RS) {
         case CopOpcode::COP_OPCODE_MFC:
             return i_mfc<cop_num>(cpu, instr);
+        case CopOpcode::COP_OPCODE_CFC:
+            return i_cfc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_MTC:
             return i_mtc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_CTC:
@@ -716,6 +747,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
+    primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
     primary_table[Opcode::OPCODE_SPECIAL2] = i_special2;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
