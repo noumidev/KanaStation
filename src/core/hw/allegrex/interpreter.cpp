@@ -56,6 +56,7 @@ enum Opcode {
     OPCODE_COP0     = 0x10,
     OPCODE_BEQL     = 0x14,
     OPCODE_BNEL     = 0x15,
+    OPCODE_SPECIAL2 = 0x1C,
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LB       = 0x20,
     OPCODE_LH       = 0x21,
@@ -73,28 +74,38 @@ enum Opcode {
 };
 
 enum SpecialOpcode {
-    SPECIAL_OPCODE_SLL  = 0x00,
-    SPECIAL_OPCODE_SRL  = 0x02,
-    SPECIAL_OPCODE_SRA  = 0x03,
-    SPECIAL_OPCODE_SLLV = 0x04,
-    SPECIAL_OPCODE_SRLV = 0x06,
-    SPECIAL_OPCODE_SRAV = 0x07,
-    SPECIAL_OPCODE_JR   = 0x08,
-    SPECIAL_OPCODE_JALR = 0x09,
-    SPECIAL_OPCODE_MOVZ = 0x0A,
-    SPECIAL_OPCODE_MOVN = 0x0B,
-    SPECIAL_OPCODE_SYNC = 0x0F,
-    SPECIAL_OPCODE_CLZ  = 0x16,
-    SPECIAL_OPCODE_ADDU = 0x21,
-    SPECIAL_OPCODE_SUBU = 0x23,
-    SPECIAL_OPCODE_AND  = 0x24,
-    SPECIAL_OPCODE_OR   = 0x25,
-    SPECIAL_OPCODE_XOR  = 0x26,
-    SPECIAL_OPCODE_NOR  = 0x27,
-    SPECIAL_OPCODE_SLT  = 0x2A,
-    SPECIAL_OPCODE_SLTU = 0x2B,
-    SPECIAL_OPCODE_MAX  = 0x2C,
-    SPECIAL_OPCODE_MIN  = 0x2D,
+    SPECIAL_OPCODE_SLL   = 0x00,
+    SPECIAL_OPCODE_SRL   = 0x02,
+    SPECIAL_OPCODE_SRA   = 0x03,
+    SPECIAL_OPCODE_SLLV  = 0x04,
+    SPECIAL_OPCODE_SRLV  = 0x06,
+    SPECIAL_OPCODE_SRAV  = 0x07,
+    SPECIAL_OPCODE_JR    = 0x08,
+    SPECIAL_OPCODE_JALR  = 0x09,
+    SPECIAL_OPCODE_MOVZ  = 0x0A,
+    SPECIAL_OPCODE_MOVN  = 0x0B,
+    SPECIAL_OPCODE_SYNC  = 0x0F,
+    SPECIAL_OPCODE_MFHI  = 0x10,
+    SPECIAL_OPCODE_MFLO  = 0x12,
+    SPECIAL_OPCODE_CLZ   = 0x16,
+    SPECIAL_OPCODE_MULT  = 0x18,
+    SPECIAL_OPCODE_MULTU = 0x19,
+    SPECIAL_OPCODE_DIVU  = 0x1B,
+    SPECIAL_OPCODE_ADDU  = 0x21,
+    SPECIAL_OPCODE_SUBU  = 0x23,
+    SPECIAL_OPCODE_AND   = 0x24,
+    SPECIAL_OPCODE_OR    = 0x25,
+    SPECIAL_OPCODE_XOR   = 0x26,
+    SPECIAL_OPCODE_NOR   = 0x27,
+    SPECIAL_OPCODE_SLT   = 0x2A,
+    SPECIAL_OPCODE_SLTU  = 0x2B,
+    SPECIAL_OPCODE_MAX   = 0x2C,
+    SPECIAL_OPCODE_MIN   = 0x2D,
+};
+
+enum Special2Opcode {
+    SPECIAL2_OPCODE_MFIC = 0x24,
+    SPECIAL2_OPCODE_MTIC = 0x26,
 };
 
 enum Special3Opcode {
@@ -107,6 +118,7 @@ enum RegimmOpcode {
     REGIMM_OPCODE_BLTZ   = 0x00,
     REGIMM_OPCODE_BGEZ   = 0x01,
     REGIMM_OPCODE_BLTZL  = 0x02,
+    REGIMM_OPCODE_BGEZL  = 0x03,
     REGIMM_OPCODE_BLTZAL = 0x10,
     REGIMM_OPCODE_BGEZAL = 0x11,
 };
@@ -169,6 +181,11 @@ static i64 i_bgez(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bgezal(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) >= 0, 31);
+    return 1;
+}
+
+static i64 i_bgezl(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) >= 0, 0);
     return 1;
 }
 
@@ -237,6 +254,21 @@ static i64 i_ctc(Allegrex* cpu, const u32 instr) {
     }
 
     return 1;
+}
+
+static i64 i_divu(Allegrex* cpu, const u32 instr) {
+    const u64 num = (u64)cpu->get_reg(RS);
+    const u64 denom = (u64)cpu->get_reg(RT);
+
+    if (denom == 0) {
+        cpu->set_reg(32, ~0);
+        cpu->set_reg(33, num);
+    } else {
+        cpu->set_reg(32, num / denom);
+        cpu->set_reg(33, num % denom);
+    }
+
+    return 1; // Not correct
 }
 
 static i64 i_ext(Allegrex* cpu, const u32 instr) {
@@ -345,6 +377,21 @@ static i64 i_mfc(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_mfhi(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(33));
+    return 1;
+}
+
+static i64 i_mfic(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->status_get_ic());
+    return 1;
+}
+
+static i64 i_mflo(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, cpu->get_reg(32));
+    return 1;
+}
+
 static i64 i_min(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, std::min((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
     return 1;
@@ -372,6 +419,27 @@ static i64 i_mtc(Allegrex* cpu, const u32 instr) {
     }
 
     return 1;
+}
+
+static i64 i_mtic(Allegrex* cpu, const u32 instr) {
+    cpu->status_set_ic(RT);
+    return 1;
+}
+
+static i64 i_mult(Allegrex* cpu, const u32 instr) {
+    const u64 result = (i64)(i32)cpu->get_reg(RS) * (i64)(i32)cpu->get_reg(RT);
+
+    cpu->set_reg(32, (u32)result);
+    cpu->set_reg(33, (u32)(result >> 32));
+    return 1; // Not correct
+}
+
+static i64 i_multu(Allegrex* cpu, const u32 instr) {
+    const u64 result = (u64)cpu->get_reg(RS) * (u64)cpu->get_reg(RT);
+
+    cpu->set_reg(32, (u32)result);
+    cpu->set_reg(33, (u32)(result >> 32));
+    return 1; // Not correct
 }
 
 static i64 i_nor(Allegrex* cpu, const u32 instr) {
@@ -548,6 +616,8 @@ static i64 i_regimm(Allegrex* cpu, const u32 instr) {
             return i_bgez(cpu, instr);
         case RegimmOpcode::REGIMM_OPCODE_BLTZL:
             return i_bltzl(cpu, instr);
+        case RegimmOpcode::REGIMM_OPCODE_BGEZL:
+            return i_bgezl(cpu, instr);
         case RegimmOpcode::REGIMM_OPCODE_BLTZAL:
             return i_bltzal(cpu, instr);
         case RegimmOpcode::REGIMM_OPCODE_BGEZAL:
@@ -579,6 +649,19 @@ static i64 i_shift_right_variable(Allegrex* cpu, const u32 instr) {
 
 static i64 i_special(Allegrex* cpu, const u32 instr) {
     return special_table[FUNCT](cpu, instr);
+}
+
+static i64 i_special2(Allegrex* cpu, const u32 instr) {
+    switch (FUNCT) {
+        case Special2Opcode::SPECIAL2_OPCODE_MFIC:
+            return i_mfic(cpu, instr);
+        case Special2Opcode::SPECIAL2_OPCODE_MTIC:
+            return i_mtic(cpu, instr);
+        default:
+            cpu->get_logger()->error("Undefined SPECIAL2 instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
+            cpu->dump_state();
+            exit(1);
+    }
 }
 
 static i64 i_special3(Allegrex* cpu, const u32 instr) {
@@ -633,6 +716,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
+    primary_table[Opcode::OPCODE_SPECIAL2] = i_special2;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
     primary_table[Opcode::OPCODE_LH      ] = i_lh;
@@ -648,28 +732,33 @@ void initialize() {
     primary_table[Opcode::OPCODE_SWR     ] = i_swr;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
 
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLL ] = i_sll;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRL ] = i_shift_right;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRA ] = i_sra;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV] = i_sllv;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV] = i_shift_right_variable;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRAV] = i_srav;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_JR  ] = i_jr;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_JALR] = i_jalr;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ] = i_movz;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN] = i_movn;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC] = i_sync;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ ] = i_clz;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU] = i_addu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU] = i_subu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_AND ] = i_and;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_OR  ] = i_or;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_XOR ] = i_xor;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_NOR ] = i_nor;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLT ] = i_slt;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU] = i_sltu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MAX ] = i_max;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MIN ] = i_min;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLL  ] = i_sll;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRL  ] = i_shift_right;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRA  ] = i_sra;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV ] = i_sllv;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV ] = i_shift_right_variable;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRAV ] = i_srav;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_JR   ] = i_jr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_JALR ] = i_jalr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ ] = i_movz;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN ] = i_movn;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC ] = i_sync;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MFHI ] = i_mfhi;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MFLO ] = i_mflo;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ  ] = i_clz;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MULT ] = i_mult;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU] = i_multu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU ] = i_divu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU ] = i_addu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU ] = i_subu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_AND  ] = i_and;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_OR   ] = i_or;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_XOR  ] = i_xor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_NOR  ] = i_nor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLT  ] = i_slt;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU ] = i_sltu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MAX  ] = i_max;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MIN  ] = i_min;
 }
 
 void soft_reset() {
