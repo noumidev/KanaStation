@@ -17,6 +17,7 @@
 #include <core/scheduler.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/ddr_ram.hpp>
 #include <core/hw/edram.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/i2c.hpp>
@@ -59,6 +60,7 @@ void initialize(const Configuration config) {
     scheduler::initialize();
     hw::bus::initialize();
     hw::boot_rom::initialize(config.boot_path);
+    hw::ddr_ram::initialize();
     hw::edram::initialize();
     hw::gpio::initialize();
     hw::i2c::initialize();
@@ -87,6 +89,7 @@ void soft_reset() {
     scheduler::soft_reset();
     hw::bus::soft_reset();
     hw::boot_rom::soft_reset();
+    hw::ddr_ram::soft_reset();
     hw::edram::soft_reset();
     hw::gpio::soft_reset();
     hw::i2c::soft_reset();
@@ -107,6 +110,7 @@ void hard_reset() {
     scheduler::hard_reset();
     hw::bus::hard_reset();
     hw::boot_rom::hard_reset();
+    hw::ddr_ram::hard_reset();
     hw::edram::hard_reset();
     hw::gpio::hard_reset();
     hw::i2c::hard_reset();
@@ -127,6 +131,7 @@ void shutdown() {
     scheduler::shutdown();
     hw::bus::shutdown();
     hw::boot_rom::shutdown();
+    hw::ddr_ram::shutdown();
     hw::edram::shutdown();
     hw::gpio::shutdown();
     hw::i2c::shutdown();
