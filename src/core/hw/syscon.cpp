@@ -32,6 +32,7 @@ enum SysconCommand {
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP   = 0x11,
     SYSCON_COMMAND_SEND_SETPARAM          = 0x25,
     SYSCON_COMMAND_CTRL_TACHYON_WDT       = 0x31,
+    SYSCON_COMMAND_CTRL_VOLTAGE           = 0x42,
     SYSCON_COMMAND_GET_POWER_STATUS       = 0x46,
 };
 
@@ -157,6 +158,11 @@ static void common_write(const u8 command) {
 
             data = (i16)data;
             break;
+        case sizeof(i16) + sizeof(u8): // i24? Multiple values?
+            std::memcpy((u8*)&data, &buf[BufferIndex::BUFFER_INDEX_RECEIVE_DATA], sizeof(i16) + sizeof(u8));
+
+            data = (data << 8) >> 8;
+            break;
         case sizeof(i32):
             std::memcpy((u8*)&data, &buf[BufferIndex::BUFFER_INDEX_RECEIVE_DATA], sizeof(i32));
             break;
@@ -166,6 +172,9 @@ static void common_write(const u8 command) {
     }
 
     switch (command) {
+        case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
+            logger->debug("CTRL_VOLTAGE: {}", data);
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
             logger->debug("CTRL_TACHYON_WDT: {}", data);
             break;
@@ -226,6 +235,7 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_SEND_SETPARAM:
             command_send_setparam();
             break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
             common_write(command);
             break;
