@@ -179,6 +179,12 @@ static void write(const u32 addr, const u32 data) {
             // 1 is written to them
             HW_SYSCTRL_NMIFLAGS &= ~data;
             break;
+        case IoAddress::IO_ADDRESS_RAMSIZE:
+            logger->debug("RAMSIZE write32 = {:08X}", data);
+            
+            // Tachyon version is read-only
+            HW_SYSCTRL_RAMSIZE = (HW_SYSCTRL_RAMSIZE & 0xFF000800) | (data & 0xFFF7FF);
+            break;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN write32 = {:08X}", data);
             write_reset_enable(data);
