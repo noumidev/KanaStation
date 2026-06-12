@@ -48,6 +48,7 @@ struct Cp0 {
     };
 
     enum StatusRegister {
+        STATUS_REGISTER_STATUS = 0x0C,
         STATUS_REGISTER_CONFIG = 0x10,
         STATUS_REGISTER_TAGLO  = 0x1C,
         STATUS_REGISTER_TAGHI  = 0x1D,
@@ -60,6 +61,27 @@ struct Cp0 {
 
     // "Free real estate"
     common::u32 control_regs[NUM_REGS];
+
+    union {
+        common::u32 raw;
+
+        struct {
+            common::u32 interrupt_enable   : 1;
+            common::u32 exception_level    : 1;
+            common::u32 error_level        : 1;
+            common::u32 mode               : 2;
+            common::u32                    : 3;
+            common::u32 interrupt_mask     : 8;
+            common::u32                    : 4;
+            common::u32 software_reset     : 1;
+            common::u32                    : 1;
+            common::u32 bootstrap_vectors  : 1;
+            common::u32                    : 2;
+            common::u32 reverse_endian     : 1;
+            common::u32                    : 2;
+            common::u32 coprocessor_usable : 4;
+        };
+    } status;
 
     common::u32 taglo;
     common::u32 taghi;
@@ -120,6 +142,10 @@ public:
 
     common::u32 get_status_reg(const common::u32 idx) const;
     void set_status_reg(const common::u32 idx, const common::u32 data);
+
+    // CP0 Status register
+    common::u32 status_get_ic() const;
+    void status_set_ic(const common::u32 data);
 
     template<typename T>
     T read(const common::u32 addr);

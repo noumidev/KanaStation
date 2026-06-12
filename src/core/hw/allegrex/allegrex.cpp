@@ -84,6 +84,8 @@ void Allegrex::hard_reset() {
     regfile = RegisterFile{};
     cp0 = Cp0{};
 
+    cp0.status.bootstrap_vectors = 1;
+
     jump(BOOT_EXCEPTION_ADDR);
 }
 
@@ -186,6 +188,9 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
     u32 data;
 
     switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
+            data = cp0.status.raw;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_CONFIG:
             data = Cp0::CONFIG;
             break;
@@ -208,6 +213,9 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     assert(idx < Cp0::NUM_REGS);
 
     switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
+            cp0.status.raw = data;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_TAGLO:
             cp0.taglo = data;
             break;
@@ -220,6 +228,14 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     }
 
     logger->debug("Write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
+}
+
+u32 Allegrex::status_get_ic() const {
+    return cp0.status.interrupt_enable;
+}
+
+void Allegrex::status_set_ic(const u32 data) {
+    cp0.status.interrupt_enable = data & 1;
 }
 
 u32 Allegrex::fetch_instr() {
