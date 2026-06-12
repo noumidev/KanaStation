@@ -188,6 +188,7 @@ enum KirkCommand {
     KIRK_COMMAND_DECRYPT_PRIVATE = 0x01,
     KIRK_COMMAND_DECRYPT_STATIC  = 0x07,
     KIRK_COMMAND_HASH            = 0x0B,
+    KIRK_COMMAND_SEED            = 0x0F,
 };
 
 enum AuthMode {
@@ -414,6 +415,32 @@ static i32 command_hash() {
     return KIRK_ERROR_OK;
 }
 
+static void increment_counter(u8* buf) {
+    u64 counter;
+
+    std::memcpy(&counter, buf, sizeof(counter));
+    counter++;
+    std::memcpy(buf, &counter, sizeof(counter));
+}
+
+static i32 command_seed() {
+    constexpr u64 INPUT_SIZE = 0x1C;
+
+    u8 buf[INPUT_SIZE];
+
+    logger->debug("SEED");
+
+    // This command is a lot more complicated, but for now we only increment
+    // the 64-bit counter
+    dma_read(HW_KIRK_SRCADDR, buf, INPUT_SIZE);
+    increment_counter(buf);
+    dma_write(HW_KIRK_DSTADDR, buf, INPUT_SIZE);
+
+    HW_KIRK_STATUS.needs_second_phase = false;
+
+    return KIRK_ERROR_OK;
+}
+
 static void start_first_phase() {
     i32 result;
 
@@ -426,6 +453,9 @@ static void start_first_phase() {
             break;
         case KirkCommand::KIRK_COMMAND_HASH:
             result = command_hash();
+            break;
+        case KirkCommand::KIRK_COMMAND_SEED:
+            result = command_seed();
             break;
         default:
             logger->error("Unimplemented command {:02X}", HW_KIRK_COMMAND);
