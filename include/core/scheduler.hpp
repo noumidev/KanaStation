@@ -30,6 +30,10 @@ common::i64 to_scheduler_cycles(const common::i64 cycles) {
     return (SCHEDULER_CLOCKRATE * cycles) / clockrate;
 }
 
+inline common::i64 from_microseconds(const common::i64 ms) {
+    return ms * ONE_MICROSECOND;
+}
+
 void schedule_event(const char* name, Callback callback, const int arg, const common::i64 cycles);
 
 bool run();
