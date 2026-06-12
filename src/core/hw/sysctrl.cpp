@@ -29,9 +29,13 @@ using namespace common;
 constexpr u64 SYSCTRL_ADDR = 0x1C100000;
 constexpr u64 SYSCTRL_SIZE = 0x1000;
 
+constexpr u32 TACHYON_VERSION = 0x40000000;
+constexpr u32 RAM_SIZE = 1;
+
 enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
+    IO_ADDRESS_RAMSIZE    = SYSCTRL_ADDR + 0x040,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
@@ -40,10 +44,12 @@ enum IoAddress {
     IO_ADDRESS_PLLFREQ    = SYSCTRL_ADDR + 0x068,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
+    IO_ADDRESS_FUSECONFIG = SYSCTRL_ADDR + 0x098,
 };
 
 #define HW_SYSCTRL_NMIEN      ctx.nmi.enable
 #define HW_SYSCTRL_NMIFLAGS   ctx.nmi.flags
+#define HW_SYSCTRL_RAMSIZE    ctx.ram_size
 #define HW_SYSCTRL_RESETEN    ctx.reset_enable
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
@@ -70,6 +76,7 @@ static struct {
         u32 flags;
     } nmi;
 
+    u32 ram_size;
     u32 reset_enable;
     u32 busclock_enable;
     u32 clock_enable[2];
@@ -89,12 +96,17 @@ static void reset_sc() {
 }
 
 static u32 read(const u32 addr) {
+    constexpr u32 FUSECONFIG = 0x0000590B;
+
     switch (addr) {
         case IoAddress::IO_ADDRESS_NMIEN:
             // For some reason, the boot ROM reads this and thinks an NMI
             // occurred if this is not zero
             logger->debug("NMIEN read32");
             return HW_SYSCTRL_NMIEN;
+        case IoAddress::IO_ADDRESS_RAMSIZE:
+            logger->debug("RAMSIZE read32");
+            return HW_SYSCTRL_RAMSIZE;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN read32");
             return HW_SYSCTRL_RESETEN;
@@ -125,6 +137,9 @@ static u32 read(const u32 addr) {
             // Potentially move this to future GPIO emulation
             logger->debug("GPIOEN read32");
             return HW_SYSCTRL_GPIOEN;
+        case IoAddress::IO_ADDRESS_FUSECONFIG:
+            logger->debug("FUSECONFIG read32");
+            return FUSECONFIG;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -215,6 +230,8 @@ void initialize() {
     reset_funcs[ResetDevice::RESET_DEVICE_SC] = reset_sc;
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    HW_SYSCTRL_RAMSIZE = TACHYON_VERSION | RAM_SIZE;
 }
 
 void soft_reset() {
