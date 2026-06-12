@@ -176,6 +176,12 @@ u32 Allegrex::get_pc() const {
     return regfile.pc;
 }
 
+u32 Allegrex::get_control_reg(const u32 idx) const {
+    assert(idx < Cp0::NUM_REGS);
+
+    return cp0.control_regs[idx];
+}
+
 void Allegrex::set_control_reg(const u32 idx, const u32 data) {
     assert(idx < Cp0::NUM_REGS);
 

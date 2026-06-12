@@ -138,6 +138,7 @@ public:
     common::u32 get_pc() const;
 
     // CP0 handlers (control and status registers)
+    common::u32 get_control_reg(const common::u32 idx) const;
     void set_control_reg(const common::u32 idx, const common::u32 data);
 
     common::u32 get_status_reg(const common::u32 idx) const;
