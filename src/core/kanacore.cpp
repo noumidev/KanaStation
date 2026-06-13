@@ -21,6 +21,7 @@
 #include <core/hw/edram.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/i2c.hpp>
+#include <core/hw/intc.hpp>
 #include <core/hw/kirk.hpp>
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
@@ -64,6 +65,7 @@ void initialize(const Configuration config) {
     hw::edram::initialize();
     hw::gpio::initialize();
     hw::i2c::initialize();
+    hw::intc::initialize();
     hw::kirk::initialize();
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
@@ -93,6 +95,7 @@ void soft_reset() {
     hw::edram::soft_reset();
     hw::gpio::soft_reset();
     hw::i2c::soft_reset();
+    hw::intc::soft_reset();
     hw::kirk::soft_reset();
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
@@ -114,6 +117,7 @@ void hard_reset() {
     hw::edram::hard_reset();
     hw::gpio::hard_reset();
     hw::i2c::hard_reset();
+    hw::intc::hard_reset();
     hw::kirk::hard_reset();
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
@@ -135,6 +139,7 @@ void shutdown() {
     hw::edram::shutdown();
     hw::gpio::shutdown();
     hw::i2c::shutdown();
+    hw::intc::shutdown();
     hw::kirk::shutdown();
     hw::nand::shutdown();
     hw::shared_ram::shutdown();

@@ -35,6 +35,7 @@ set(SOURCES
     src/core/hw/edram.cpp
     src/core/hw/gpio.cpp
     src/core/hw/i2c.cpp
+    src/core/hw/intc.cpp
     src/core/hw/kirk.cpp
     src/core/hw/nand.cpp
     src/core/hw/shared_ram.cpp
@@ -59,6 +60,7 @@ set(HEADERS
     include/core/hw/edram.hpp
     include/core/hw/gpio.hpp
     include/core/hw/i2c.hpp
+    include/core/hw/intc.hpp
     include/core/hw/kirk.hpp
     include/core/hw/nand.hpp
     include/core/hw/shared_ram.hpp
