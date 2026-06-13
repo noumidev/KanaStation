@@ -24,6 +24,7 @@
 #define POS    ((instr >>  6) & 0x1F)
 #define UIMM   ((instr >>  0) & 0xFFFF)
 #define TARGET ((instr >>  0) & 0x3FFFFFF)
+#define SCCODE ((instr >>  6) & 0xFFFFF)
 
 namespace kanacore::hw::allegrex::interpreter {
 
@@ -54,6 +55,7 @@ enum Opcode {
     OPCODE_XORI     = 0x0E,
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
+    OPCODE_COP1     = 0x11,
     OPCODE_BEQL     = 0x14,
     OPCODE_BNEL     = 0x15,
     OPCODE_BLEZL    = 0x16,
@@ -72,39 +74,45 @@ enum Opcode {
     OPCODE_SW       = 0x2B,
     OPCODE_SWR      = 0x2E,
     OPCODE_CACHE    = 0x2F,
+    OPCODE_LWC1     = 0x31,
+    OPCODE_SWC1     = 0x39,
 };
 
 enum SpecialOpcode {
-    SPECIAL_OPCODE_SLL   = 0x00,
-    SPECIAL_OPCODE_SRL   = 0x02,
-    SPECIAL_OPCODE_SRA   = 0x03,
-    SPECIAL_OPCODE_SLLV  = 0x04,
-    SPECIAL_OPCODE_SRLV  = 0x06,
-    SPECIAL_OPCODE_SRAV  = 0x07,
-    SPECIAL_OPCODE_JR    = 0x08,
-    SPECIAL_OPCODE_JALR  = 0x09,
-    SPECIAL_OPCODE_MOVZ  = 0x0A,
-    SPECIAL_OPCODE_MOVN  = 0x0B,
-    SPECIAL_OPCODE_SYNC  = 0x0F,
-    SPECIAL_OPCODE_MFHI  = 0x10,
-    SPECIAL_OPCODE_MFLO  = 0x12,
-    SPECIAL_OPCODE_CLZ   = 0x16,
-    SPECIAL_OPCODE_MULT  = 0x18,
-    SPECIAL_OPCODE_MULTU = 0x19,
-    SPECIAL_OPCODE_DIVU  = 0x1B,
-    SPECIAL_OPCODE_ADDU  = 0x21,
-    SPECIAL_OPCODE_SUBU  = 0x23,
-    SPECIAL_OPCODE_AND   = 0x24,
-    SPECIAL_OPCODE_OR    = 0x25,
-    SPECIAL_OPCODE_XOR   = 0x26,
-    SPECIAL_OPCODE_NOR   = 0x27,
-    SPECIAL_OPCODE_SLT   = 0x2A,
-    SPECIAL_OPCODE_SLTU  = 0x2B,
-    SPECIAL_OPCODE_MAX   = 0x2C,
-    SPECIAL_OPCODE_MIN   = 0x2D,
+    SPECIAL_OPCODE_SLL     = 0x00,
+    SPECIAL_OPCODE_SRL     = 0x02,
+    SPECIAL_OPCODE_SRA     = 0x03,
+    SPECIAL_OPCODE_SLLV    = 0x04,
+    SPECIAL_OPCODE_SRLV    = 0x06,
+    SPECIAL_OPCODE_SRAV    = 0x07,
+    SPECIAL_OPCODE_JR      = 0x08,
+    SPECIAL_OPCODE_JALR    = 0x09,
+    SPECIAL_OPCODE_MOVZ    = 0x0A,
+    SPECIAL_OPCODE_MOVN    = 0x0B,
+    SPECIAL_OPCODE_SYSCALL = 0x0C,
+    SPECIAL_OPCODE_SYNC    = 0x0F,
+    SPECIAL_OPCODE_MFHI    = 0x10,
+    SPECIAL_OPCODE_MTHI    = 0x11,
+    SPECIAL_OPCODE_MFLO    = 0x12,
+    SPECIAL_OPCODE_MTLO    = 0x13,
+    SPECIAL_OPCODE_CLZ     = 0x16,
+    SPECIAL_OPCODE_MULT    = 0x18,
+    SPECIAL_OPCODE_MULTU   = 0x19,
+    SPECIAL_OPCODE_DIVU    = 0x1B,
+    SPECIAL_OPCODE_ADDU    = 0x21,
+    SPECIAL_OPCODE_SUBU    = 0x23,
+    SPECIAL_OPCODE_AND     = 0x24,
+    SPECIAL_OPCODE_OR      = 0x25,
+    SPECIAL_OPCODE_XOR     = 0x26,
+    SPECIAL_OPCODE_NOR     = 0x27,
+    SPECIAL_OPCODE_SLT     = 0x2A,
+    SPECIAL_OPCODE_SLTU    = 0x2B,
+    SPECIAL_OPCODE_MAX     = 0x2C,
+    SPECIAL_OPCODE_MIN     = 0x2D,
 };
 
 enum Special2Opcode {
+    SPECIAL2_OPCODE_HALT = 0x00,
     SPECIAL2_OPCODE_MFIC = 0x24,
     SPECIAL2_OPCODE_MTIC = 0x26,
 };
@@ -129,6 +137,11 @@ enum CopOpcode {
     COP_OPCODE_CFC = 0x02,
     COP_OPCODE_MTC = 0x04,
     COP_OPCODE_CTC = 0x06,
+    COP_OPCODE_SECONDARY = 0x10,
+};
+
+enum Cp0Opcode {
+    CP0_OPCODE_ERET = 0x18,
 };
 
 enum BitShuffleOpcode {
@@ -139,6 +152,7 @@ enum BitShuffleOpcode {
 
 enum CopNum {
     COP_NUM_CP0,
+    COP_NUM_FPU,
 };
 
 static std::array<Instruction, PRIMARY_TABLE_SIZE> primary_table;
@@ -251,6 +265,9 @@ static i64 i_cfc(Allegrex* cpu, const u32 instr) {
         case CopNum::COP_NUM_CP0:
             cpu->set_reg(RT, cpu->get_control_reg(RD));
             break;
+        case CopNum::COP_NUM_FPU:
+            cpu->set_reg(RT, cpu->get_fpu_control_reg(RD));
+            break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for CFC", cop_num);
             exit(1);
@@ -269,6 +286,9 @@ static i64 i_ctc(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_control_reg(RD, cpu->get_reg(RT));
+            break;
+        case CopNum::COP_NUM_FPU:
+            cpu->set_fpu_control_reg(RD, cpu->get_reg(RT));
             break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for CTC", cop_num);
@@ -293,11 +313,21 @@ static i64 i_divu(Allegrex* cpu, const u32 instr) {
     return 1; // Not correct
 }
 
+static i64 i_eret(Allegrex* cpu) {
+    cpu->return_from_exception();
+    return 1;
+}
+
 static i64 i_ext(Allegrex* cpu, const u32 instr) {
     // What happens when the CPU encounters this?
     assert((POS + SIZE + 1) <= 32);
 
     cpu->set_reg(RT, (cpu->get_reg(RS) >> POS) & (0xFFFFFFFFU >> (31 - SIZE)));
+    return 1;
+}
+
+static i64 i_halt(Allegrex* cpu) {
+    cpu->wait_for_interrupt();
     return 1;
 }
 
@@ -361,6 +391,11 @@ static i64 i_lui(Allegrex* cpu, const u32 instr) {
 
 static i64 i_lw(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
+    return 1;
+}
+
+static i64 i_lwc1(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr_raw(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
     return 1;
 }
 
@@ -443,8 +478,18 @@ static i64 i_mtc(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_mthi(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(33, cpu->get_reg(RS));
+    return 1;
+}
+
 static i64 i_mtic(Allegrex* cpu, const u32 instr) {
     cpu->status_set_ic(RT);
+    return 1;
+}
+
+static i64 i_mtlo(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(32, cpu->get_reg(RS));
     return 1;
 }
 
@@ -564,6 +609,11 @@ static i64 i_sw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_swc1(Allegrex* cpu, const u32 instr) {
+    cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM, cpu->get_fgr_raw(RT));
+    return 1;
+}
+
 static i64 i_swl(Allegrex* cpu, const u32 instr) {
     const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
     const u32 shift = 8 * (addr & 3);
@@ -581,6 +631,12 @@ static i64 i_swr(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_sync(Allegrex*, const u32) {
+    return 1;
+}
+
+static i64 i_syscall(Allegrex* cpu, const u32 instr) {
+    cpu->raise_lv1_exception(Cp0::EXCEPTION_CODE_SYSCALL);
+    cpu->set_syscall_code(SCCODE);
     return 1;
 }
 
@@ -632,8 +688,19 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
             return i_mtc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_CTC:
             return i_ctc<cop_num>(cpu, instr);
+        case CopOpcode::COP_OPCODE_SECONDARY:
+            assert(cop_num == COP_NUM_CP0);
+
+            switch (FUNCT) {
+                case Cp0Opcode::CP0_OPCODE_ERET:
+                    return i_eret(cpu);
+                default:
+                    cpu->get_logger()->error("Undefined CP0 secondary instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
+                    cpu->dump_state();
+                    exit(1);
+            }
         default:
-            cpu->get_logger()->error("Undefined COP{} instruction {:02X} ({:08X}) @ {:08X}", cop_num, RS, instr, cpu->get_instr_addr());
+            cpu->get_logger()->error("Undefined COP{} primary instruction {:02X} ({:08X}) @ {:08X}", cop_num, RS, instr, cpu->get_instr_addr());
             cpu->dump_state();
             exit(1);
     }
@@ -684,6 +751,8 @@ static i64 i_special(Allegrex* cpu, const u32 instr) {
 
 static i64 i_special2(Allegrex* cpu, const u32 instr) {
     switch (FUNCT) {
+        case Special2Opcode::SPECIAL2_OPCODE_HALT:
+            return i_halt(cpu);
         case Special2Opcode::SPECIAL2_OPCODE_MFIC:
             return i_mfic(cpu, instr);
         case Special2Opcode::SPECIAL2_OPCODE_MTIC:
@@ -745,6 +814,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_XORI    ] = i_xori;
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
+    primary_table[Opcode::OPCODE_COP1    ] = i_cop<1>;
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
@@ -763,34 +833,39 @@ void initialize() {
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
     primary_table[Opcode::OPCODE_SWR     ] = i_swr;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
+    primary_table[Opcode::OPCODE_LWC1    ] = i_lwc1;
+    primary_table[Opcode::OPCODE_SWC1    ] = i_swc1;
 
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLL  ] = i_sll;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRL  ] = i_shift_right;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRA  ] = i_sra;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV ] = i_sllv;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV ] = i_shift_right_variable;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SRAV ] = i_srav;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_JR   ] = i_jr;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_JALR ] = i_jalr;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ ] = i_movz;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN ] = i_movn;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC ] = i_sync;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MFHI ] = i_mfhi;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MFLO ] = i_mflo;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ  ] = i_clz;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MULT ] = i_mult;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU] = i_multu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU ] = i_divu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU ] = i_addu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU ] = i_subu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_AND  ] = i_and;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_OR   ] = i_or;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_XOR  ] = i_xor;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_NOR  ] = i_nor;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLT  ] = i_slt;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU ] = i_sltu;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MAX  ] = i_max;
-    special_table[SpecialOpcode::SPECIAL_OPCODE_MIN  ] = i_min;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLL    ] = i_sll;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRL    ] = i_shift_right;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRA    ] = i_sra;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLLV   ] = i_sllv;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRLV   ] = i_shift_right_variable;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SRAV   ] = i_srav;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_JR     ] = i_jr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_JALR   ] = i_jalr;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ   ] = i_movz;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN   ] = i_movn;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SYSCALL] = i_syscall;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC   ] = i_sync;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MFHI   ] = i_mfhi;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MTHI   ] = i_mthi;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MFLO   ] = i_mflo;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MTLO   ] = i_mtlo;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ    ] = i_clz;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MULT   ] = i_mult;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU  ] = i_multu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU   ] = i_divu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU   ] = i_addu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU   ] = i_subu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_AND    ] = i_and;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_OR     ] = i_or;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_XOR    ] = i_xor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_NOR    ] = i_nor;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLT    ] = i_slt;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU   ] = i_sltu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MAX    ] = i_max;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MIN    ] = i_min;
 }
 
 void soft_reset() {
@@ -809,6 +884,10 @@ void run(Allegrex* cpu) {
     if (cpu->get_cpu_id() == CpuId::CPU_ID_ME) {
         cpu->get_logger()->error("Media Engine not implemented");
         exit(1);
+    }
+
+    if (!cpu->is_running()) {
+        *cpu->get_cycles() = 0;
     }
 
     while (*cpu->get_cycles() > 0) {
