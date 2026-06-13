@@ -77,6 +77,11 @@ template void Allegrex::write(const u32, const u32);
 
 void Allegrex::soft_reset() {
     // This has a bit more to it than this, but for now this should suffice
+    state = CpuState::Run;
+
+    cp0.status.bootstrap_vectors = 1;
+    cp0.status.software_reset = 1;
+
     jump(BOOT_EXCEPTION_ADDR);
 }
 
@@ -84,7 +89,10 @@ void Allegrex::hard_reset() {
     regfile = RegisterFile{};
     cp0 = Cp0{};
 
+    state = CpuState::Run;
+
     cp0.status.bootstrap_vectors = 1;
+    cp0.status.software_reset = 0;
 
     jump(BOOT_EXCEPTION_ADDR);
 }
@@ -197,8 +205,20 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             data = cp0.status.raw;
             break;
+        case Cp0::StatusRegister::STATUS_REGISTER_CAUSE:
+            data = cp0.cause.raw;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_EPC:
+            data = cp0.epc;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_CONFIG:
             data = Cp0::CONFIG;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_SCCODE:
+            data = cp0.sccode;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_EBASE:
+            data = cp0.ebase;
             break;
         case Cp0::StatusRegister::STATUS_REGISTER_TAGLO:
             data = cp0.taglo;
@@ -222,6 +242,15 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             cp0.status.raw = data;
             break;
+        case Cp0::StatusRegister::STATUS_REGISTER_CAUSE:
+            cp0.cause.raw = (cp0.cause.raw & 0xFFFFFCFF) | (data & 0x300);
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_EPC:
+            cp0.epc = data;
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_EBASE:
+            cp0.ebase = data;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_TAGLO:
             cp0.taglo = data;
             break;
@@ -242,6 +271,109 @@ u32 Allegrex::status_get_ic() const {
 
 void Allegrex::status_set_ic(const u32 data) {
     cp0.status.interrupt_enable = data & 1;
+}
+
+u32 Allegrex::get_exception_pc() {
+    u32 epc;
+
+    if (cp0.status.error_level) {
+        logger->error("Unimplemented return from error");
+        exit(1);
+    } else if (cp0.status.exception_level) {
+        epc = cp0.epc;
+
+        cp0.status.exception_level = 0;
+    } else {
+        logger->error("Invalid exception level");
+        exit(1);
+    }
+
+    return epc;
+}
+
+void Allegrex::raise_lv1_exception(const Cp0::ExceptionCode excode) {
+    constexpr u32 LV1_VECTOR_BASE = 0xBFC00200;
+
+    logger->debug("{} exception (PC: {:08X})", Cp0::EXCEPTION_CODE_NAMES[excode], get_instr_addr());
+
+    cp0.cause.exception_code = excode;
+
+    u32 vector_base;
+
+    if (cp0.status.bootstrap_vectors) {
+        vector_base = LV1_VECTOR_BASE;
+    } else {
+        vector_base = cp0.ebase;
+    }
+
+    const u32 epc = get_instr_addr();
+
+    cp0.cause.in_delay_slot = in_delay_slot();
+
+    if (in_delay_slot()) {
+        cp0.epc = epc - sizeof(u32);
+    } else {
+        cp0.epc = epc;
+    }
+
+    cp0.status.exception_level = 1;
+
+    jump(vector_base);
+}
+
+void Allegrex::return_from_exception() {
+    const u32 epc = get_exception_pc();
+
+    logger->debug("Returning from exception (EPC: {:08X})", epc);
+
+    jump(epc);
+}
+
+void Allegrex::set_syscall_code(const u32 sccode) {
+    cp0.sccode = sccode << 2;
+}
+
+void Allegrex::wait_for_interrupt() {
+    // This will exit the interpreter loop
+    cycles = 1;
+
+    state = CpuState::WaitForInterrupt;
+}
+
+u32 Allegrex::get_fpu_control_reg(const u32 idx) const {
+    switch (idx) {
+        case 31:
+            logger->debug("Read from FPU control register Status");
+            return fpu.status.raw;
+        default:
+            logger->error("Unimplemented read from FPU control register {}", idx);
+            exit(1);
+    }
+}
+
+void Allegrex::set_fpu_control_reg(const u32 idx, const u32 data) {
+    switch (idx) {
+        case 31:
+            logger->debug("Write to FPU control register Status = {:08X}", data);
+
+            fpu.status.raw = data;
+            break;
+        default:
+            logger->error("Unimplemented write to FPU control register {}", idx);
+            exit(1);
+    }
+}
+
+u32 Allegrex::get_fgr_raw(const u32 idx) const {
+    assert(idx < Fpu::NUM_REGS);
+
+    return fpu.fgrs[idx].raw;
+}
+
+void Allegrex::set_fgr_raw(const u32 idx, const u32 data) {
+    assert(idx < Fpu::NUM_REGS);
+
+    fpu.fgrs[idx].raw = data;
 }
 
 u32 Allegrex::fetch_instr() {

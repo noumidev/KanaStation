@@ -42,16 +42,38 @@ struct Cp0 {
         "BadVAddr", "Count" , "N/A"     , "Compare",
         "Status"  , "Cause" , "EPC"     , "PRId"   ,
         "Config"  , "N/A"   , "N/A"     , "N/A"    ,
-        "N/A"     , "SCCode", "CPUId"   , "EBase"  ,
-        "N/A"     , "N/A"   , "N/A"     , "N/A"    ,
+        "N/A"     , "SCCode", "CPUId"   , "N/A"    ,
+        "N/A"     , "EBase" , "N/A"     , "N/A"    ,
         "TagLo"   , "TagHi" , "ErrorEPC", "N/A"    ,
     };
 
     enum StatusRegister {
         STATUS_REGISTER_STATUS = 0x0C,
+        STATUS_REGISTER_CAUSE  = 0x0D,
+        STATUS_REGISTER_EPC    = 0x0E,
         STATUS_REGISTER_CONFIG = 0x10,
+        STATUS_REGISTER_SCCODE = 0x15,
+        STATUS_REGISTER_EBASE  = 0x19,
         STATUS_REGISTER_TAGLO  = 0x1C,
         STATUS_REGISTER_TAGHI  = 0x1D,
+    };
+
+
+    static constexpr common::u64 NUM_EXCODES = 32;
+
+    static constexpr const char* EXCEPTION_CODE_NAMES[NUM_EXCODES] = {
+        "Interrupt"         , "N/A"                , "N/A"                  , "N/A"                 ,
+        "Load address error", "Store address error", "Instruction bus error", "Data bus error"      ,
+        "Syscall"           , "Breakpoint"         , "Reserved instruction" , "Coprocessor unusable",
+        "Overflow"          , "N/A"                , "N/A"                  , "FPU"                 ,
+        "N/A"               , "N/A"                , "N/A"                  , "N/A"                 ,
+        "N/A"               , "N/A"                , "N/A"                  , "N/A"                 ,
+        "N/A"               , "N/A"                , "N/A"                  , "N/A"                 ,
+        "N/A"               , "N/A"                , "N/A"                  , "N/A"                 ,
+    };
+
+    enum ExceptionCode {
+        EXCEPTION_CODE_SYSCALL = 0x08,
     };
 
     // 2^(12 + 2) = 16 KB
@@ -83,8 +105,50 @@ struct Cp0 {
         };
     } status;
 
+    union {
+        common::u32 raw;
+
+        struct {
+            common::u32                   : 2;
+            common::u32 exception_code    : 6;
+            common::u32 interrupt_flags   : 8;
+            common::u32                   : 12;
+            common::u32 coprocessor_error : 2;
+            common::u32                   : 1;
+            common::u32 in_delay_slot     : 1;
+        };
+    } cause;
+
+    common::u32 epc;
+    common::u32 sccode;
+    common::u32 ebase;
     common::u32 taglo;
     common::u32 taghi;
+};
+
+// CP1
+struct Fpu {
+    static constexpr common::u64 NUM_REGS = 32;
+
+    union {
+        common::u32 raw;
+        common::f32 flt;
+    } fgrs[NUM_REGS];
+
+    union {
+        common::u32 raw;
+
+        struct {
+            common::u32 rounding_mode : 2;
+            common::u32 flags         : 5;
+            common::u32 enables       : 5;
+            common::u32 cause         : 6;
+            common::u32               : 5;
+            common::u32 condition     : 1;
+            common::u32 flush_denorm  : 1;
+            common::u32               : 7;
+        };
+    } status;
 };
 
 struct Allegrex {
@@ -95,9 +159,15 @@ private:
 
     RegisterFile regfile;
     Cp0 cp0;
+    Fpu fpu;
 
     common::u32 instr_addr;
     common::i64 cycles;
+
+    enum class CpuState {
+        Run,
+        WaitForInterrupt
+    } state;
 
 public:
     Allegrex(const CpuId cpu_id);
@@ -117,6 +187,10 @@ public:
 
     bool is_media_engine() const {
         return cpu_id == CpuId::CPU_ID_ME;
+    }
+
+    bool is_running() const {
+        return state == CpuState::Run;
     }
 
     void soft_reset();
@@ -147,6 +221,19 @@ public:
     // CP0 Status register
     common::u32 status_get_ic() const;
     void status_set_ic(const common::u32 data);
+
+    common::u32 get_exception_pc();
+    void raise_lv1_exception(const Cp0::ExceptionCode excode);
+    void return_from_exception();
+    void set_syscall_code(const common::u32 sccode);
+    void wait_for_interrupt();
+
+    // FPU handlers (control registers, FGRs)
+    common::u32 get_fpu_control_reg(const common::u32 idx) const;
+    void set_fpu_control_reg(const common::u32 idx, const common::u32 data);
+
+    common::u32 get_fgr_raw(const common::u32 idx) const;
+    void set_fgr_raw(const common::u32 idx, const common::u32 data);
 
     template<typename T>
     T read(const common::u32 addr);
