@@ -73,7 +73,8 @@ struct Cp0 {
     };
 
     enum ExceptionCode {
-        EXCEPTION_CODE_SYSCALL = 0x08,
+        EXCEPTION_CODE_INTERRUPT = 0x00,
+        EXCEPTION_CODE_SYSCALL   = 0x08,
     };
 
     // 2^(12 + 2) = 16 KB
@@ -165,10 +166,15 @@ private:
     common::i64 cycles;
     common::i64 target_timestamp;
 
+    bool delay_slot_pending;
+    bool in_delay_slot;
+
     enum class CpuState {
         Run,
         WaitForInterrupt
     } state;
+
+    bool is_interrupt_pending() const;
 
 public:
     Allegrex(const CpuId cpu_id);
@@ -198,12 +204,20 @@ public:
         return state == CpuState::Run;
     }
 
+    void advance_delay_slot() {
+        in_delay_slot = delay_slot_pending;
+        delay_slot_pending = false;
+    }
+
+    void clear_delay_slot() {
+        in_delay_slot = false;
+        delay_slot_pending = false;
+    }
+
     void soft_reset();
     void hard_reset();
 
     void dump_state();
-
-    bool in_delay_slot() const;
 
     void jump(const common::u32 target);
     void delayed_jump(const common::u32 target);
@@ -232,6 +246,8 @@ public:
     void return_from_exception();
     void set_syscall_code(const common::u32 sccode);
     void wait_for_interrupt();
+    void assert_interrupt();
+    void clear_interrupt();
 
     // FPU handlers (control registers, FGRs)
     common::u32 get_fpu_control_reg(const common::u32 idx) const;

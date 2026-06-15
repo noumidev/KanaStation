@@ -29,6 +29,22 @@ Allegrex::~Allegrex() {
 
 }
 
+bool Allegrex::is_interrupt_pending() const {
+    /* logger->debug("IE: {}, EXL: {}, ERL: {}, IM: {:08b}, IF: {:08b}",
+        cp0.status.interrupt_enable,
+        cp0.status.exception_level,
+        cp0.status.error_level,
+        cp0.status.interrupt_mask,
+        cp0.cause.interrupt_flags
+    ); */
+
+    return
+        cp0.status.interrupt_enable &&
+        !cp0.status.exception_level &&
+        !cp0.status.error_level &&
+        ((cp0.status.interrupt_mask & cp0.cause.interrupt_flags) != 0);
+}
+
 template<typename T>
 T Allegrex::read(const u32 addr) {
     if ((addr & (sizeof(T) - 1)) != 0) {
@@ -125,18 +141,13 @@ void Allegrex::dump_state() {
     }
 }
 
-bool Allegrex::in_delay_slot() const {
-    // If next_pc is not 8 bytes ahead of the address of the
-    // current instruction, we are in a delay slot.
-    // This should work in most situations (we will get back to this when it doesn't work)
-    return regfile.next_pc != (instr_addr + 2 * sizeof(u32));
-}
-
 void Allegrex::jump(const u32 target) {
     if constexpr (!SILENT_JUMPS) logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
 
     regfile.pc = target;
     regfile.next_pc = target + sizeof(u32);
+
+    clear_delay_slot();
 }
 
 void Allegrex::delayed_jump(const u32 target) {
@@ -149,12 +160,14 @@ template<bool is_branch_likely>
 void Allegrex::branch(const u32 target, const bool condition, const u32 link_idx) {
     assert(link_idx < RegisterFile::NUM_GPRS);
 
-    if (in_delay_slot()) {
+    if (in_delay_slot) {
         logger->error("Branch in delay slot");
         exit(1);
     }
 
     set_reg(link_idx, regfile.next_pc);
+
+    delay_slot_pending = true;
 
     if (condition) {
         delayed_jump(target);
@@ -263,6 +276,10 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     }
 
     logger->debug("Write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
+
+    if (is_interrupt_pending()) {
+        raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
+    }
 }
 
 u32 Allegrex::status_get_ic() const {
@@ -271,6 +288,10 @@ u32 Allegrex::status_get_ic() const {
 
 void Allegrex::status_set_ic(const u32 data) {
     cp0.status.interrupt_enable = data & 1;
+
+    if (is_interrupt_pending()) {
+        raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
+    }
 }
 
 u32 Allegrex::get_exception_pc() {
@@ -294,7 +315,25 @@ u32 Allegrex::get_exception_pc() {
 void Allegrex::raise_lv1_exception(const Cp0::ExceptionCode excode) {
     constexpr u32 LV1_VECTOR_BASE = 0xBFC00200;
 
-    logger->debug("{} exception (PC: {:08X})", Cp0::EXCEPTION_CODE_NAMES[excode], get_instr_addr());
+    u32 epc;
+
+    if (excode == Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT) {
+        // For our delay slot logic to work (since interrupts are
+        // triggered at the end of an instruction for us), we need to manually
+        // call this here
+        advance_delay_slot();
+
+        // EPC also needs to point to the *next* instruction
+        epc = get_pc();
+    } else {
+        // All other general exceptions are synchronous and restart the
+        // current instruction
+        epc = get_instr_addr();
+    }
+
+    logger->debug("{} exception (PC: {:08X})", Cp0::EXCEPTION_CODE_NAMES[excode], epc);
+
+    assert(!cp0.status.exception_level);
 
     cp0.cause.exception_code = excode;
 
@@ -306,11 +345,10 @@ void Allegrex::raise_lv1_exception(const Cp0::ExceptionCode excode) {
         vector_base = cp0.ebase;
     }
 
-    const u32 epc = get_instr_addr();
+    cp0.cause.in_delay_slot = in_delay_slot;
 
-    cp0.cause.in_delay_slot = in_delay_slot();
-
-    if (in_delay_slot()) {
+    if (in_delay_slot) {
+        // The CPU always returns to the branch preceding the delay slot
         cp0.epc = epc - sizeof(u32);
     } else {
         cp0.epc = epc;
@@ -327,6 +365,11 @@ void Allegrex::return_from_exception() {
     logger->debug("Returning from exception (EPC: {:08X})", epc);
 
     jump(epc);
+
+    // Re-check for interrupts here
+    if (is_interrupt_pending()) {
+        raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
+    }
 }
 
 void Allegrex::set_syscall_code(const u32 sccode) {
@@ -335,9 +378,21 @@ void Allegrex::set_syscall_code(const u32 sccode) {
 
 void Allegrex::wait_for_interrupt() {
     // This will exit the interpreter loop
-    cycles = 1;
+    cycles = target_timestamp;
 
     state = CpuState::WaitForInterrupt;
+}
+
+void Allegrex::assert_interrupt() {
+    cp0.cause.interrupt_flags |= 1 << 2;
+
+    if (is_interrupt_pending()) {
+        raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
+    }
+}
+
+void Allegrex::clear_interrupt() {
+    cp0.cause.interrupt_flags &= ~(1 << 2);
 }
 
 u32 Allegrex::get_fpu_control_reg(const u32 idx) const {
@@ -379,6 +434,8 @@ void Allegrex::set_fgr_raw(const u32 idx, const u32 data) {
 u32 Allegrex::fetch_instr() {
     // Update current instruction address
     instr_addr = regfile.pc;
+
+    advance_delay_slot();
 
     const u32 instr = read<u32>(regfile.pc);
 
