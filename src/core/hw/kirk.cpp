@@ -24,6 +24,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::kirk {
@@ -441,6 +442,13 @@ static i32 command_seed() {
     return KIRK_ERROR_OK;
 }
 
+static void end_first_phase(const int result) {
+    HW_KIRK_STATUS.phase_done  = true;
+    HW_KIRK_STATUS.phase_error = result != KirkError::KIRK_ERROR_OK;
+
+    HW_KIRK_RESULT = result;
+}
+
 static void start_first_phase() {
     i32 result;
 
@@ -462,11 +470,11 @@ static void start_first_phase() {
             exit(1);
     }
 
-    // TODO: delay command completion
-    HW_KIRK_STATUS.phase_done  = true;
-    HW_KIRK_STATUS.phase_error = result != KirkError::KIRK_ERROR_OK;
+    // Timings will vary between commands and payload lengths, so we just pick
+    // a short delay for now
+    scheduler::schedule_event("KIRK PHASE1", end_first_phase, result, scheduler::from_microseconds(20));
 
-    HW_KIRK_RESULT = result;
+    HW_KIRK_STATUS.phase_done = false;
 }
 
 static u32 read(const u32 addr) {
