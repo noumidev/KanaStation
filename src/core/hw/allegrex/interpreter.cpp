@@ -880,20 +880,25 @@ void shutdown() {
 
 }
 
-void run(Allegrex* cpu) {
+void run(Allegrex* cpu, const i64 target_timestamp) {
     if (cpu->get_cpu_id() == CpuId::CPU_ID_ME) {
         cpu->get_logger()->error("Media Engine not implemented");
         exit(1);
     }
 
     if (!cpu->is_running()) {
-        *cpu->get_cycles() = 0;
+        *cpu->get_cycles() = target_timestamp;
+        return;
     }
 
-    while (*cpu->get_cycles() > 0) {
+    *cpu->get_target_timestamp() = target_timestamp;
+
+    assert(*cpu->get_target_timestamp() > *cpu->get_cycles());
+
+    while (*cpu->get_cycles() < *cpu->get_target_timestamp()) {
         const u32 instr = cpu->fetch_instr();
 
-        *cpu->get_cycles() -= primary_table[OPCODE](cpu, instr);
+        *cpu->get_cycles() += primary_table[OPCODE](cpu, instr);
     }
 };
 

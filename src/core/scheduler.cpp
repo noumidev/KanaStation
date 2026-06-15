@@ -46,14 +46,6 @@ static EventQueue event_queue;
 
 static i64 global_timestamp;
 
-static void set_cpu_cycles_and_step(const i64 cycles) {
-    hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
-
-    *sc->get_cycles() = cycles;
-    
-    hw::allegrex::interpreter::run(sc);
-}
-
 void initialize() {
     logger = spdlog::stdout_color_st("Scheduler");
 }
@@ -78,40 +70,43 @@ void shutdown() {
 void schedule_event(const char *name, Callback callback, const int arg, const i64 cycles) {
     logger->debug("Scheduling event {} with arg: {} in {} cycles", name, arg, cycles);
 
+    hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
+
+    const i64 event_timestamp = *sc->get_cycles() + cycles;
+
     event_queue.emplace(
         Event{
             callback,
             arg,
-            global_timestamp + cycles
+            event_timestamp
         }
     );
+
+    // If the new event expires before the current event, we make it the new closest event
+    if (event_timestamp < global_timestamp) {
+        global_timestamp = event_timestamp;
+
+        *sc->get_target_timestamp() = event_timestamp;
+    }
 }
 
 bool run() {
-    i64 new_timestamp;
+    hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
 
     if (event_queue.empty()) {
-        new_timestamp = global_timestamp + MAX_CYCLES;
+        global_timestamp = *sc->get_cycles() + MAX_CYCLES;
     } else {
-        new_timestamp = event_queue.top().timestamp;
+        global_timestamp = event_queue.top().timestamp;
     }
 
-    set_cpu_cycles_and_step(new_timestamp - global_timestamp);
+    hw::allegrex::interpreter::run(sc, global_timestamp);
 
     // Process all events with an expired timestamp
-    while (!event_queue.empty() && (event_queue.top().timestamp <= new_timestamp)) {
-        const Callback callback = event_queue.top().callback;
-
-        const int arg = event_queue.top().arg;
-        const i64 timestamp = event_queue.top().timestamp;
-
+    while (!event_queue.empty() && (event_queue.top().timestamp <= *sc->get_cycles())) {
+        const Event event = event_queue.top();
         event_queue.pop();
 
-        assert(timestamp > global_timestamp);
-        
-        global_timestamp = timestamp;
-
-        callback(arg);
+        event.callback(event.arg);
     }
 
     return true;

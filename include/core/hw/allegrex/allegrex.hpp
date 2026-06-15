@@ -163,6 +163,7 @@ private:
 
     common::u32 instr_addr;
     common::i64 cycles;
+    common::i64 target_timestamp;
 
     enum class CpuState {
         Run,
@@ -183,6 +184,10 @@ public:
 
     common::i64* get_cycles() {
         return &cycles;
+    }
+
+    common::i64* get_target_timestamp() {
+        return &target_timestamp;
     }
 
     bool is_media_engine() const {

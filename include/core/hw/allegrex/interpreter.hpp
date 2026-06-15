@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <common/types.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 
 namespace kanacore::hw::allegrex::interpreter {
@@ -16,6 +17,6 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
-void run(Allegrex* cpu);
+void run(Allegrex* cpu, const common::i64 target_timestamp);
 
 };
