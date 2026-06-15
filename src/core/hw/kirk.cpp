@@ -26,6 +26,7 @@
 #include <common/types.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 
 namespace kanacore::hw::kirk {
 
@@ -33,6 +34,8 @@ using namespace common;
 
 constexpr u64 KIRK_ADDR = 0x1DE00000;
 constexpr u64 KIRK_SIZE = 0x1000;
+
+constexpr int KIRK_INTERRUPT = 24;
 
 constexpr u64 AES_KEY_SIZE = 16;
 constexpr u64 AES_KEYSTORE_SIZE = 128;
@@ -447,6 +450,8 @@ static void end_first_phase(const int result) {
     HW_KIRK_STATUS.phase_error = result != KirkError::KIRK_ERROR_OK;
 
     HW_KIRK_RESULT = result;
+
+    intc::assert_interrupt(KIRK_INTERRUPT);
 }
 
 static void start_first_phase() {
@@ -513,8 +518,8 @@ static void write(const u32 addr, const u32 data) {
             HW_KIRK_COMMAND = data;
             break;
         case IoAddress::IO_ADDRESS_STATEND:
-            // Not sure if this does anything that's visible to SC
             logger->debug("STATEND write32 = {:08X}", data);
+            intc::clear_interrupt(KIRK_INTERRUPT);
             break;
         case IoAddress::IO_ADDRESS_SRCADDR:
             logger->debug("SRCADDR write32 = {:08X}", data);
