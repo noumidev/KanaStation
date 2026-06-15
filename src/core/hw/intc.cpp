@@ -29,9 +29,15 @@ constexpr u64 INTC_SIZE = 0x1000;
 constexpr u64 NUM_REGS = 3;
 
 enum IoAddress {
-    IO_ADDRESS_MASK_LO  = INTC_ADDR + 0x008,
-    IO_ADDRESS_MASK_MID = INTC_ADDR + 0x018,
-    IO_ADDRESS_MASK_HI  = INTC_ADDR + 0x028,
+    IO_ADDRESS_FLAGS_LO     = INTC_ADDR + 0x000,
+    IO_ADDRESS_RAWFLAGS_LO  = INTC_ADDR + 0x004,
+    IO_ADDRESS_MASK_LO      = INTC_ADDR + 0x008,
+    IO_ADDRESS_FLAGS_MID    = INTC_ADDR + 0x010,
+    IO_ADDRESS_RAWFLAGS_MID = INTC_ADDR + 0x014,
+    IO_ADDRESS_MASK_MID     = INTC_ADDR + 0x018,
+    IO_ADDRESS_FLAGS_HI     = INTC_ADDR + 0x020,
+    IO_ADDRESS_RAWFLAGS_HI  = INTC_ADDR + 0x024,
+    IO_ADDRESS_MASK_HI      = INTC_ADDR + 0x028,
 };
 
 #define HW_INTC_FLAGS        ctx.flags
@@ -71,12 +77,33 @@ static void check_pending_interrupts() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_FLAGS_LO:
+            logger->debug("FLAGS_LO read32");
+            return HW_INTC_FLAGS_LO;
+        case IoAddress::IO_ADDRESS_RAWFLAGS_LO:
+            logger->debug("RAWFLAGS_LO read32");
+            return HW_INTC_RAWFLAGS_LO;
         case IoAddress::IO_ADDRESS_MASK_LO:
             logger->debug("MASK_LO read32");
             return HW_INTC_MASK_LO;
+        case IoAddress::IO_ADDRESS_FLAGS_MID:
+            logger->debug("FLAGS_MID read32");
+            return HW_INTC_FLAGS_MID;
+        case IoAddress::IO_ADDRESS_RAWFLAGS_MID:
+            logger->debug("RAWFLAGS_MID read32");
+            return HW_INTC_RAWFLAGS_MID;
         case IoAddress::IO_ADDRESS_MASK_MID:
             logger->debug("MASK_MID read32");
             return HW_INTC_MASK_MID;
+        case IoAddress::IO_ADDRESS_FLAGS_HI:
+            logger->debug("FLAGS_HI read32");
+            return HW_INTC_FLAGS_HI;
+        case IoAddress::IO_ADDRESS_RAWFLAGS_HI:
+            logger->debug("RAWFLAGS_HI read32");
+            return HW_INTC_RAWFLAGS_HI;
+        case IoAddress::IO_ADDRESS_MASK_HI:
+            logger->debug("MASK_HI read32");
+            return HW_INTC_MASK_HI;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -96,6 +123,12 @@ static void write(const u32 addr, const u32 data) {
 
             HW_INTC_MASK_MID = data;
             HW_INTC_FLAGS_MID |= (HW_INTC_MASK_MID & HW_INTC_RAWFLAGS_MID);
+            break;
+        case IoAddress::IO_ADDRESS_MASK_HI:
+            logger->debug("MASK_HI write32 = {:08X}", data);
+
+            HW_INTC_MASK_HI = data;
+            HW_INTC_FLAGS_HI |= (HW_INTC_MASK_HI & HW_INTC_RAWFLAGS_HI);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
@@ -130,6 +163,8 @@ void shutdown() {
 }
 
 void assert_interrupt(const int intr_num) {
+    logger->debug("Interrupt {} asserted", intr_num);
+
     const int reg_idx = intr_num >> 5;
     const int intr_bit = 1 << (intr_num & 31);
 
@@ -146,6 +181,23 @@ void assert_interrupt(const int intr_num) {
 
         kanacore::get_sc_ptr()->assert_interrupt();
     }
+}
+
+void clear_interrupt(const int intr_num) {
+    logger->debug("Interrupt {} cleared", intr_num);
+
+    const int reg_idx = intr_num >> 5;
+    const int intr_bit = 1 << (intr_num & 31);
+
+    assert((u64)reg_idx < NUM_REGS);
+
+    u32* flags = &HW_INTC_FLAGS[reg_idx];
+    u32* raw_flags = &HW_INTC_RAWFLAGS[reg_idx];
+
+    *flags &= ~intr_bit;
+    *raw_flags &= ~intr_bit;
+    
+    check_pending_interrupts();
 }
 
 };
