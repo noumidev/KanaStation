@@ -16,4 +16,6 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
+void assert_interrupt(const int intr_num);
+
 };
