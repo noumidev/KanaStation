@@ -105,7 +105,7 @@ static u32 read(const u32 addr) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_COUNTER:
             logger->debug("COUNTER read32");
-            return HW_SYSCTRL_COUNTER;
+            return get_counter();
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
