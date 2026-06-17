@@ -16,6 +16,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 #include <core/hw/syscon.hpp>
 #include <core/hw/sysctrl.hpp>
 
@@ -25,6 +26,8 @@ using namespace common;
 
 constexpr u64 GPIO_ADDR = 0x1E240000;
 constexpr u64 GPIO_SIZE = 0x1000;
+
+constexpr int GPIO_INTERRUPT = 4;
 
 enum IoAddress {
     IO_ADDRESS_OUTEN    = GPIO_ADDR + 0x000,
@@ -37,6 +40,8 @@ enum IoAddress {
     IO_ADDRESS_INTRMASK = GPIO_ADDR + 0x01C,
     IO_ADDRESS_INTRSTAT = GPIO_ADDR + 0x020,
     IO_ADDRESS_INTRCLR  = GPIO_ADDR + 0x024,
+    IO_ADDRESS_CPTEN    = GPIO_ADDR + 0x030,
+    IO_ADDRESS_TMRCPTEN = GPIO_ADDR + 0x034,
     IO_ADDRESS_INEN     = GPIO_ADDR + 0x040,
 };
 
@@ -46,6 +51,8 @@ enum IoAddress {
 #define HW_GPIO_RISEINTR ctx.rising_edge_enable
 #define HW_GPIO_INTRMASK ctx.interrupt_mask
 #define HW_GPIO_INTRSTAT ctx.interrupt_status
+#define HW_GPIO_CPTEN    ctx.capture_enable
+#define HW_GPIO_TMRCPTEN ctx.timer_capture_enable
 #define HW_GPIO_INEN     ctx.input_enable
 
 static struct {
@@ -57,6 +64,8 @@ static struct {
     u32 rising_edge_enable;
     u32 interrupt_mask;
     u32 interrupt_status;
+    u32 capture_enable;
+    u32 timer_capture_enable;
     u32 input_enable;
 } ctx;
 
@@ -73,6 +82,14 @@ static const char* get_pin_name(const u32 pin) {
             return "SYSCON_ACKNOWLEDGE";
         default:
             return "N/A";
+    }
+}
+
+static void check_pending_interrupts() {
+    if ((HW_GPIO_INTRMASK & HW_GPIO_INTRSTAT) != 0) {
+        intc::assert_interrupt(GPIO_INTERRUPT);
+    } else {
+        intc::clear_interrupt(GPIO_INTERRUPT);
     }
 }
 
@@ -191,6 +208,18 @@ static void write(const u32 addr, const u32 data) {
 
             HW_GPIO_INTRSTAT &= ~data;
             break;
+        case IoAddress::IO_ADDRESS_CPTEN:
+            // The PSPdev wiki says this is what it is. Unsure how it works
+            logger->debug("CPTEN write32 = {:08X}", data);
+
+            HW_GPIO_CPTEN = data;
+            break;
+        case IoAddress::IO_ADDRESS_TMRCPTEN:
+            // The PSPdev wiki says this is what it is. Unsure how it works
+            logger->debug("TMRCPTEN write32 = {:08X}", data);
+
+            HW_GPIO_TMRCPTEN = data;
+            break;
         case IoAddress::IO_ADDRESS_INEN:
             logger->debug("INEN write32 = {:08X}", data);
 
@@ -200,6 +229,8 @@ static void write(const u32 addr, const u32 data) {
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             exit(1);
     }
+
+    check_pending_interrupts();
 }
 
 void initialize() {
@@ -248,6 +279,8 @@ void clear_pin(const u32 pin) {
             HW_GPIO_INTRSTAT |= 1 << pin;
         }
     }
+
+    check_pending_interrupts();
 }
 
 void set_pin(const u32 pin) {
@@ -266,6 +299,8 @@ void set_pin(const u32 pin) {
             HW_GPIO_INTRSTAT |= 1 << pin;
         }
     }
+
+    check_pending_interrupts();
 }
 
 };
