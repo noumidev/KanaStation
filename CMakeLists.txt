@@ -42,6 +42,7 @@ set(SOURCES
     src/core/hw/spi.cpp
     src/core/hw/syscon.cpp
     src/core/hw/sysctrl.cpp
+    src/core/hw/systime.cpp
     src/core/hw/allegrex/allegrex.cpp
     src/core/hw/allegrex/interpreter.cpp
     src/core/hw/allegrex/scratchpad.cpp
@@ -67,6 +68,7 @@ set(HEADERS
     include/core/hw/spi.hpp
     include/core/hw/syscon.hpp
     include/core/hw/sysctrl.hpp
+    include/core/hw/systime.hpp
     include/core/hw/allegrex/allegrex.hpp
     include/core/hw/allegrex/interpreter.hpp
     include/core/hw/allegrex/scratchpad.hpp
