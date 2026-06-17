@@ -20,6 +20,7 @@
 #include <common/types.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 
 namespace kanacore::hw::nand {
 
@@ -40,6 +41,8 @@ constexpr u64 NUM_PAGES_PER_BLOCK = 32;
 constexpr u64 BLOCK_SIZE = NUM_PAGES_PER_BLOCK * PAGE_SIZE_WITH_ECC;
 constexpr u64 NUM_BLOCKS = 2048;
 constexpr u64 NAND_SIZE  = NUM_BLOCKS * BLOCK_SIZE;
+
+constexpr int NAND_INTERRUPT = 20;
 
 enum IoAddress {
     IO_ADDRESS_CONTROL = NAND_INTERFACE_ADDR + 0x000,
@@ -217,6 +220,8 @@ static void reset_nand_chip() {
 static void reset_nand_interface() {
     // Does this reset the chip?
     state = NandState::NAND_STATE_IDLE;
+
+    intc::clear_interrupt(NAND_INTERRUPT);
 }
 
 static void command_erase_block() {
@@ -310,6 +315,8 @@ static void assert_dma_interrupt(const bool is_write) {
     // This does make the NAND driver happy, at least
     HW_NAND_DMAINTR.other = 0x3;
     HW_NAND_DMAINTR.flags = 1 << is_write;
+
+    intc::assert_interrupt(NAND_INTERRUPT);
 }
 
 static void end_dma(const int is_write) {
@@ -488,7 +495,9 @@ static void write(const u32 addr, const u32 data) {
             HW_NAND_DMAINTR.other  = data >> 8;
             HW_NAND_DMAINTR.flags &= ~(data & 3);
 
-            // This should clear NAND interrupts
+            if (HW_NAND_DMAINTR.flags == 0) {
+                intc::clear_interrupt(NAND_INTERRUPT);
+            }
             break;
         case IoAddress::IO_ADDRESS_RESUME:
             logger->debug("RESUME write32 = {:08X}", data);
