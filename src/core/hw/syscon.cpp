@@ -7,6 +7,7 @@
 
 #include <core/hw/syscon.hpp>
 
+#include <array>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -25,11 +26,24 @@ using namespace common;
 
 constexpr u64 BUFFER_SIZE = 16;
 
+constexpr u64 SCRATCHPAD_SIZE = 0x20;
+
+// These values were taken from one of my PSPs
+constexpr static u8 INITIAL_SCRATCHPAD[SCRATCHPAD_SIZE] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x2F, 0x00, 0x00, 0xEA, 0x3C, 0x91, 0x4B,
+    0x4F, 0x5F, 0x52, 0x58, 0x1C, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 enum SysconCommand {
     SYSCON_COMMAND_GET_BARYON_VERSION     = 0x01,
     SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY = 0x07,
+    SYSCON_COMMAND_READ_CLOCK             = 0x09,
+    SYSCON_COMMAND_READ_ALARM             = 0x0A,
     SYSCON_COMMAND_GET_WAKE_UP_FACTOR     = 0x0E,
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP   = 0x11,
+    SYSCON_COMMAND_READ_SCRATCHPAD        = 0x24,
     SYSCON_COMMAND_SEND_SETPARAM          = 0x25,
     SYSCON_COMMAND_CTRL_TACHYON_WDT       = 0x31,
     SYSCON_COMMAND_CTRL_VOLTAGE           = 0x42,
@@ -49,6 +63,10 @@ enum BaryonStatus {
     BARYON_STATUS_AC_POWER = 0,
     BARYON_STATUS_ALARM    = 3,
 };
+
+static struct {
+    std::array<u8, SCRATCHPAD_SIZE> scratchpad;
+} ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
 
@@ -132,6 +150,18 @@ static void common_read(const u8 command) {
             // All buttons unpressed
             data = 0xFFEF7FFF;
             break;
+        case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
+            logger->debug("READ_CLOCK");
+            
+            // Not sure what this is
+            data = 0;
+            break;
+        case SysconCommand::SYSCON_COMMAND_READ_ALARM:
+            logger->debug("READ_ALARM");
+            
+            // See above
+            data = 0;
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
             logger->debug("GET_WAKE_UP_FACTOR");
             
@@ -212,6 +242,17 @@ static void command_get_baryon_version() {
     write_transmit_data((u8*)&BARYON_VERSION, sizeof(BARYON_VERSION));
 }
 
+static void command_read_scratchpad() {
+    const u8 idx  = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] >> 2;
+    const u8 size = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3;
+
+    logger->debug("READ_SCRATCHPAD (idx: {}, size: {})", idx, size);
+
+    assert((idx + size) < SCRATCHPAD_SIZE);
+
+    write_transmit_data(&ctx.scratchpad[idx], size);
+}
+
 static void command_send_setparam() {
     u64 setparam;
 
@@ -242,6 +283,9 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
             command_get_baryon_timestamp();
             break;
+        case SysconCommand::SYSCON_COMMAND_READ_SCRATCHPAD:
+            command_read_scratchpad();
+            break;
         case SysconCommand::SYSCON_COMMAND_SEND_SETPARAM:
             command_send_setparam();
             break;
@@ -250,6 +294,8 @@ static void start_command() {
             common_write(command);
             break;
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
+        case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
+        case SysconCommand::SYSCON_COMMAND_READ_ALARM:
         case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             common_read(command);
@@ -277,6 +323,8 @@ static void start_command() {
 
 void initialize() {
     logger = spdlog::stdout_color_st("SYSCON");
+
+    std::memcpy(ctx.scratchpad.data(), INITIAL_SCRATCHPAD, SCRATCHPAD_SIZE);
 }
 
 void soft_reset() {
