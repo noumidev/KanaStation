@@ -348,7 +348,12 @@ static void start_dma() {
         std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
     }
 
-    scheduler::schedule_event("NAND DMA", end_dma, is_write, scheduler::from_microseconds(60));
+    scheduler::schedule_event(
+        scheduler::EventType::NAND_DMA,
+        end_dma,
+        is_write,
+        scheduler::from_microseconds(60)
+    );
 }
 
 static u32 read(const u32 addr) {

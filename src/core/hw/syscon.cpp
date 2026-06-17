@@ -87,7 +87,12 @@ static void transmit_data(const int) {
     ptr += 2;
 
     if (ptr < (buf[BufferIndex::BUFFER_INDEX_SIZE] + 1)) {
-        scheduler::schedule_event("SYSCON TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
+        scheduler::schedule_event(
+            scheduler::EventType::SYSCON_TX,
+            transmit_data,
+            0,
+            scheduler::SPI_CLOCKRATE
+        );
     } else {
         spi::end_reception();
     
@@ -98,7 +103,12 @@ static void transmit_data(const int) {
 static void start_transmission() {
     spi::start_reception();
 
-    scheduler::schedule_event("SYSCON TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
+    scheduler::schedule_event(
+        scheduler::EventType::SYSCON_TX,
+        transmit_data,
+        0,
+        scheduler::SPI_CLOCKRATE
+    );
 }
 
 static void write_transmit_data(const u8* data, const u64 size) {

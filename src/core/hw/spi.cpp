@@ -144,7 +144,12 @@ static void transmit_data(const int) {
         // Repeat transmission
         logger->debug("Continuing transmission");
 
-        scheduler::schedule_event("SPI TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
+        scheduler::schedule_event(
+            scheduler::EventType::SPI_TX,
+            transmit_data,
+            0,
+            scheduler::SPI_CLOCKRATE
+        );
     } else {
         HW_SPI_STATUS.busy = false;
     }
@@ -162,7 +167,12 @@ static void start_transmission() {
 
     HW_SPI_STATUS.busy = true;
 
-    scheduler::schedule_event("SPI TX", transmit_data, 0, scheduler::SPI_CLOCKRATE);
+    scheduler::schedule_event(
+        scheduler::EventType::SPI_TX,
+        transmit_data,
+        0,
+        scheduler::from_microseconds(2)
+    );
 }
 
 static u32 read_receive_fifo() {

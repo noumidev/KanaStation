@@ -477,7 +477,12 @@ static void start_first_phase() {
 
     // Timings will vary between commands and payload lengths, so we just pick
     // a short delay for now
-    scheduler::schedule_event("KIRK PHASE1", end_first_phase, result, scheduler::from_microseconds(20));
+    scheduler::schedule_event(
+        scheduler::EventType::KIRK_1ST_PHASE,
+        end_first_phase,
+        result,
+        scheduler::from_microseconds(5)
+    );
 
     HW_KIRK_STATUS.phase_done = false;
 }
@@ -530,6 +535,10 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("DSTADDR write32 = {:08X}", data);
 
             HW_KIRK_DSTADDR = data;
+            break;
+        case KIRK_ADDR + 0x020:
+        case KIRK_ADDR + 0x024:
+            logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
