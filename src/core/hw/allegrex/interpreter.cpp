@@ -99,6 +99,7 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_MULT    = 0x18,
     SPECIAL_OPCODE_MULTU   = 0x19,
     SPECIAL_OPCODE_DIVU    = 0x1B,
+    SPECIAL_OPCODE_ADD     = 0x20,
     SPECIAL_OPCODE_ADDU    = 0x21,
     SPECIAL_OPCODE_SUBU    = 0x23,
     SPECIAL_OPCODE_AND     = 0x24,
@@ -165,6 +166,9 @@ static i64 i_addiu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->get_reg(RS) + (i32)(i16)UIMM);
     return 1;
 }
+
+// Is identical to ADDU as far as I remember, so...
+// static i64 i_add(Allegrex* cpu, const u32 instr) {
 
 static i64 i_addu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RS) + cpu->get_reg(RT));
@@ -484,7 +488,7 @@ static i64 i_mthi(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_mtic(Allegrex* cpu, const u32 instr) {
-    cpu->status_set_ic(RT);
+    cpu->status_set_ic(cpu->get_reg(RT));
     return 1;
 }
 
@@ -856,6 +860,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_MULT   ] = i_mult;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU  ] = i_multu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU   ] = i_divu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_ADD    ] = i_addu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU   ] = i_addu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU   ] = i_subu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_AND    ] = i_and;
