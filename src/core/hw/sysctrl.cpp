@@ -41,10 +41,11 @@ enum IoAddress {
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
     IO_ADDRESS_CLOCKEN_HI = SYSCTRL_ADDR + 0x058,
     IO_ADDRESS_SPICLKSEL  = SYSCTRL_ADDR + 0x064,
-    IO_ADDRESS_PLLFREQ    = SYSCTRL_ADDR + 0x068,
+    IO_ADDRESS_PLLCTRL    = SYSCTRL_ADDR + 0x068,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
     IO_ADDRESS_FUSECONFIG = SYSCTRL_ADDR + 0x098,
+    IO_ADDRESS_PLLMULT    = SYSCTRL_ADDR + 0x0FC,
 };
 
 #define HW_SYSCTRL_NMIEN      ctx.nmi.enable
@@ -55,9 +56,10 @@ enum IoAddress {
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
 #define HW_SYSCTRL_CLOCKEN_HI ctx.clock_enable[1]
 #define HW_SYSCTRL_SPICLKSEL  ctx.spi_clock_select
-#define HW_SYSCTRL_PLLFREQ    ctx.pll_frequency
+#define HW_SYSCTRL_PLLCTRL    ctx.pll_control
 #define HW_SYSCTRL_IOEN       ctx.io_enable
 #define HW_SYSCTRL_GPIOEN     ctx.gpio_enable
+#define HW_SYSCTRL_PLLMULT    ctx.pll_multiplier
 
 enum ResetDevice {
     RESET_DEVICE_SC  = 1,
@@ -81,9 +83,10 @@ static struct {
     u32 busclock_enable;
     u32 clock_enable[2];
     u32 spi_clock_select;
-    u32 pll_frequency;
+    u32 pll_control;
     u32 io_enable;
     u32 gpio_enable;
+    u32 pll_multiplier;
 } ctx;
 
 static void reset_sc() {
@@ -122,14 +125,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_SPICLKSEL:
             logger->debug("SPICLKSEL read32");
             return HW_SYSCTRL_SPICLKSEL;
-        case IoAddress::IO_ADDRESS_PLLFREQ:
-            logger->debug("PLLFREQ read32");
-
-            // The boot ROM reads the upper 16 bits of this register and
-            // enables the audio clock(?) if non-zero. To my knowledge, it's unknown
-            // what these bits mean.
-            // TODO: figure out what value to initialize the PLL freq to
-            return HW_SYSCTRL_PLLFREQ;
+        case IoAddress::IO_ADDRESS_PLLCTRL:
+            logger->debug("PLLCTRL read32");
+            return HW_SYSCTRL_PLLCTRL;
         case IoAddress::IO_ADDRESS_IOEN:
             logger->debug("IOEN read32");
             return HW_SYSCTRL_IOEN;
@@ -140,6 +138,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_FUSECONFIG:
             logger->debug("FUSECONFIG read32");
             return FUSECONFIG;
+        case IoAddress::IO_ADDRESS_PLLMULT:
+            logger->debug("PLLMULT read32");
+            return HW_SYSCTRL_PLLMULT;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
