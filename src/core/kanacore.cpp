@@ -15,6 +15,7 @@
 
 #include <common/types.hpp>
 #include <core/scheduler.hpp>
+#include <core/hw/audio.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/ddr_ram.hpp>
@@ -61,6 +62,7 @@ void initialize(const Configuration config) {
 
     scheduler::initialize();
     hw::bus::initialize();
+    hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::ddr_ram::initialize();
     hw::edram::initialize();
@@ -92,6 +94,7 @@ void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
     scheduler::soft_reset();
     hw::bus::soft_reset();
+    hw::audio::soft_reset();
     hw::boot_rom::soft_reset();
     hw::ddr_ram::soft_reset();
     hw::edram::soft_reset();
@@ -115,6 +118,7 @@ void hard_reset() {
     // This should hard reset all components (including memory)
     scheduler::hard_reset();
     hw::bus::hard_reset();
+    hw::audio::hard_reset();
     hw::boot_rom::hard_reset();
     hw::ddr_ram::hard_reset();
     hw::edram::hard_reset();
@@ -138,6 +142,7 @@ void shutdown() {
     // This shuts down all components
     scheduler::shutdown();
     hw::bus::shutdown();
+    hw::audio::shutdown();
     hw::boot_rom::shutdown();
     hw::ddr_ram::shutdown();
     hw::edram::shutdown();
