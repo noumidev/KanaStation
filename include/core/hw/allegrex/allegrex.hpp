@@ -48,6 +48,7 @@ struct Cp0 {
     };
 
     enum StatusRegister {
+        STATUS_REGISTER_COUNT  = 0x09,
         STATUS_REGISTER_STATUS = 0x0C,
         STATUS_REGISTER_CAUSE  = 0x0D,
         STATUS_REGISTER_EPC    = 0x0E,
@@ -120,11 +121,14 @@ struct Cp0 {
         };
     } cause;
 
+    common::u32 count;
     common::u32 epc;
     common::u32 sccode;
     common::u32 ebase;
     common::u32 taglo;
     common::u32 taghi;
+
+    common::i64 count_timestamp;
 };
 
 // CP1
@@ -179,6 +183,8 @@ private:
 public:
     Allegrex(const CpuId cpu_id);
     ~Allegrex();
+
+    bool trace;
 
     CpuId get_cpu_id() const {
         return cpu_id;

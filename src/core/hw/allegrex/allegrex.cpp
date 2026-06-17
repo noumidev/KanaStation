@@ -215,6 +215,9 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
     u32 data;
 
     switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_COUNT:
+            data = cp0.count + (cycles - cp0.count_timestamp);
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             data = cp0.status.raw;
             break;
@@ -252,6 +255,11 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     assert(idx < Cp0::NUM_REGS);
 
     switch (idx) {
+        case Cp0::StatusRegister::STATUS_REGISTER_COUNT:
+            cp0.count = data;
+
+            cp0.count_timestamp = cycles;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             cp0.status.raw = data;
             break;
@@ -325,6 +333,8 @@ void Allegrex::raise_lv1_exception(const Cp0::ExceptionCode excode) {
 
         // EPC also needs to point to the *next* instruction
         epc = get_pc();
+
+        state = CpuState::Run;
     } else {
         // All other general exceptions are synchronous and restart the
         // current instruction
