@@ -259,7 +259,9 @@ public:
     common::u32 get_fpu_control_reg(const common::u32 idx) const;
     void set_fpu_control_reg(const common::u32 idx, const common::u32 data);
 
+    common::f32 get_fgr(const common::u32 idx) const;
     common::u32 get_fgr_raw(const common::u32 idx) const;
+    void set_fgr(const common::u32 idx, const common::f32 data);
     void set_fgr_raw(const common::u32 idx, const common::u32 data);
 
     template<typename T>

@@ -18,8 +18,11 @@
 #define FUNCT  ((instr >>  0) & 0x3F)
 #define RS     ((instr >> 21) & 0x1F)
 #define RT     ((instr >> 16) & 0x1F)
+#define FT     ((instr >> 16) & 0x1F)
 #define RD     ((instr >> 11) & 0x1F)
+#define FS     ((instr >> 11) & 0x1F)
 #define SIZE   ((instr >> 11) & 0x1F)
+#define FD     ((instr >>  6) & 0x1F)
 #define SA     ((instr >>  6) & 0x1F)
 #define POS    ((instr >>  6) & 0x1F)
 #define UIMM   ((instr >>  0) & 0xFFFF)
@@ -134,15 +137,22 @@ enum RegimmOpcode {
 };
 
 enum CopOpcode {
-    COP_OPCODE_MFC = 0x00,
-    COP_OPCODE_CFC = 0x02,
-    COP_OPCODE_MTC = 0x04,
-    COP_OPCODE_CTC = 0x06,
-    COP_OPCODE_SECONDARY = 0x10,
+    COP_OPCODE_MFC       = 0x00,
+    COP_OPCODE_CFC       = 0x02,
+    COP_OPCODE_MTC       = 0x04,
+    COP_OPCODE_CTC       = 0x06,
+    COP_OPCODE_SECONDARY = 0x10, // CP0
+    COP_OPCODE_SINGLE    = 0x10, // FPU
+    COP_OPCODE_WORD      = 0x14, // FPU
 };
 
 enum Cp0Opcode {
     CP0_OPCODE_ERET = 0x18,
+};
+
+enum FpuOpcode {
+    FPU_OPCODE_MUL  = 0x02,
+    FPU_OPCODE_CVTS = 0x20,
 };
 
 enum BitShuffleOpcode {
@@ -302,6 +312,11 @@ static i64 i_ctc(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_cvts(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, (f32)cpu->get_fgr_raw(FS));
+    return 1;
+}
+
 static i64 i_divu(Allegrex* cpu, const u32 instr) {
     const u64 num = (u64)cpu->get_reg(RS);
     const u64 denom = (u64)cpu->get_reg(RT);
@@ -327,6 +342,11 @@ static i64 i_ext(Allegrex* cpu, const u32 instr) {
     assert((POS + SIZE + 1) <= 32);
 
     cpu->set_reg(RT, (cpu->get_reg(RS) >> POS) & (0xFFFFFFFFU >> (31 - SIZE)));
+    return 1;
+}
+
+static i64 i_fmul(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, cpu->get_fgr(FS) * cpu->get_fgr(FT));
     return 1;
 }
 
@@ -473,6 +493,9 @@ static i64 i_mtc(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_status_reg(RD, cpu->get_reg(RT));
+            break;
+        case CopNum::COP_NUM_FPU:
+            cpu->set_fgr_raw(RD, cpu->get_reg(RT));
             break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for MTC", cop_num);
@@ -693,13 +716,35 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
         case CopOpcode::COP_OPCODE_CTC:
             return i_ctc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_SECONDARY:
-            assert(cop_num == COP_NUM_CP0);
+            assert(cop_num <= COP_NUM_FPU);
+
+            if (cop_num == COP_NUM_CP0) {
+                switch (FUNCT) {
+                    case Cp0Opcode::CP0_OPCODE_ERET:
+                        return i_eret(cpu);
+                    default:
+                        cpu->get_logger()->error("Undefined CP0 secondary instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
+                        cpu->dump_state();
+                        exit(1);
+                }
+            } else {
+                switch (FUNCT) {
+                    case FpuOpcode::FPU_OPCODE_MUL:
+                        return i_fmul(cpu, instr);
+                    default:
+                        cpu->get_logger()->error("Undefined FPU SINGLE instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
+                        cpu->dump_state();
+                        exit(1);
+                }
+            }
+        case CopOpcode::COP_OPCODE_WORD:
+            assert(cop_num == COP_NUM_FPU);
 
             switch (FUNCT) {
-                case Cp0Opcode::CP0_OPCODE_ERET:
-                    return i_eret(cpu);
+                case FpuOpcode::FPU_OPCODE_CVTS:
+                    return i_cvts(cpu, instr);
                 default:
-                    cpu->get_logger()->error("Undefined CP0 secondary instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
+                    cpu->get_logger()->error("Undefined FPU WORD instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
                     cpu->dump_state();
                     exit(1);
             }

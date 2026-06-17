@@ -9,6 +9,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cmath>
 #include <type_traits>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -429,10 +430,27 @@ void Allegrex::set_fpu_control_reg(const u32 idx, const u32 data) {
     }
 }
 
+f32 Allegrex::get_fgr(const u32 idx) const {
+    assert(idx < Fpu::NUM_REGS);
+
+    const f32 data = fpu.fgrs[idx].flt;
+
+    assert(!(isnan(data) || isinf(data)));
+
+    return data;
+}
+
 u32 Allegrex::get_fgr_raw(const u32 idx) const {
     assert(idx < Fpu::NUM_REGS);
 
     return fpu.fgrs[idx].raw;
+}
+
+void Allegrex::set_fgr(const u32 idx, const f32 data) {
+    assert(idx < Fpu::NUM_REGS);
+    assert(!(isnan(data) || isinf(data)));
+
+    fpu.fgrs[idx].flt = data;
 }
 
 void Allegrex::set_fgr_raw(const u32 idx, const u32 data) {
