@@ -18,6 +18,7 @@
 
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 
 namespace kanacore::hw::i2c {
 
@@ -27,6 +28,8 @@ constexpr u64 I2C_ADDR = 0x1E200000;
 constexpr u64 I2C_SIZE = 0x1000;
 
 constexpr u64 FIFO_SIZE = 256;
+
+constexpr int I2C_INTERRUPT = 12;
 
 enum IoAddress {
     IO_ADDRESS_CONTROL  = I2C_ADDR + 0x004,
@@ -68,10 +71,12 @@ static std::shared_ptr<spdlog::logger> logger;
 static std::queue<u8> transmit_fifo;
 static std::queue<u8> receive_fifo;
 
-static void end_transmission_reception() {
+static void end_transmission_reception(const int) {
     HW_I2C_CONTROL.busy = false;
 
     HW_I2C_INTRSTAT |= 1;
+
+    intc::assert_interrupt(I2C_INTERRUPT);
 }
 
 static void start_transmission() {
@@ -87,10 +92,16 @@ static void start_transmission() {
             transmit_fifo.pop();
         }
     } else {
+        // I think this shouldn't *actually* happen, needs investigation
         logger->warn("Transmission length is 0");
     }
     
-    end_transmission_reception();
+    scheduler::schedule_event(
+        scheduler::EventType::I2C,
+        end_transmission_reception,
+        0,
+        scheduler::from_microseconds(50 * HW_I2C_LENGTH)
+    );
 }
 
 static void start_reception() {
@@ -106,8 +117,13 @@ static void start_reception() {
     for (u32 i = 0; i < HW_I2C_LENGTH; i++) {
         receive_fifo.push(0xFF);
     }
-    
-    end_transmission_reception();
+
+    scheduler::schedule_event(
+        scheduler::EventType::I2C,
+        end_transmission_reception,
+        0,
+        scheduler::from_microseconds(50 * HW_I2C_LENGTH)
+    );
 }
 
 static u8 read_receive_fifo() {
@@ -192,6 +208,8 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("INTRSTAT write32 = {:08X}", data);
 
             HW_I2C_INTRSTAT &= ~data;
+
+            intc::clear_interrupt(I2C_INTERRUPT);
             break;
         case I2C_ADDR + 0x010:
         case I2C_ADDR + 0x014:

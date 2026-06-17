@@ -33,6 +33,7 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "KIRK 1st phase",
     "SPI TX",
     "SYSCON TX",
+    "I2C",
     "NAND DMA",
     "SysTime"
 };

@@ -24,6 +24,7 @@ enum EventType {
     KIRK_1ST_PHASE,
     SPI_TX,
     SYSCON_TX,
+    I2C,
     NAND_DMA,
     SYSTIME,
     NUM_EVENT_TYPES,
