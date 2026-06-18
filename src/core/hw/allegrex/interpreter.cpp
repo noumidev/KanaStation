@@ -62,6 +62,7 @@ enum Opcode {
     OPCODE_BEQL     = 0x14,
     OPCODE_BNEL     = 0x15,
     OPCODE_BLEZL    = 0x16,
+    OPCODE_BGTZL    = 0x17,
     OPCODE_SPECIAL2 = 0x1C,
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LB       = 0x20,
@@ -222,6 +223,11 @@ static i64 i_bgezl(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bgtz(Allegrex* cpu, const u32 instr) {
     cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) > 0, 0);
+    return 1;
+}
+
+static i64 i_bgtzl(Allegrex* cpu, const u32 instr) {
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), (i32)cpu->get_reg(RS) > 0, 0);
     return 1;
 }
 
@@ -867,6 +873,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
+    primary_table[Opcode::OPCODE_BGTZL   ] = i_bgtzl;
     primary_table[Opcode::OPCODE_SPECIAL2] = i_special2;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
