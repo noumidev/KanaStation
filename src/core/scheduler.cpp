@@ -35,7 +35,8 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "SYSCON TX",
     "I2C",
     "NAND DMA",
-    "SysTime"
+    "SysTime",
+    "VSYNC",
 };
 
 struct Event {

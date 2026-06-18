@@ -40,6 +40,18 @@ static std::shared_ptr<spdlog::logger> logger;
 
 static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
 
+// Move this to display code later on
+static void vsync(const int) {
+    hw::intc::assert_interrupt(30);
+
+    scheduler::schedule_event(
+        scheduler::EventType::VSYNC,
+        vsync,
+        0,
+        scheduler::from_microseconds(16666)
+    );
+}
+
 void initialize(const Configuration config) {
     static bool IS_INITIALIZED = false;
 
@@ -140,6 +152,13 @@ void hard_reset() {
     hw::uart::hard_reset();
 
     sc.hard_reset();
+
+    scheduler::schedule_event(
+        scheduler::EventType::VSYNC,
+        vsync,
+        0,
+        scheduler::from_microseconds(16666)
+    );
 }
 
 void shutdown() {
