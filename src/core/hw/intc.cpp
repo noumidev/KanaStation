@@ -112,17 +112,35 @@ static u32 read(const u32 addr) {
 
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_FLAGS_LO:
+            logger->debug("FLAGS_LO write32 = {:08X}", data);
+
+            HW_INTC_FLAGS_LO &= ~data;
+            HW_INTC_RAWFLAGS_LO &= ~data;
+            break;
         case IoAddress::IO_ADDRESS_MASK_LO:
             logger->debug("MASK_LO write32 = {:08X}", data);
 
             HW_INTC_MASK_LO = data;
             HW_INTC_FLAGS_LO |= (HW_INTC_MASK_LO & HW_INTC_RAWFLAGS_LO);
             break;
+        case IoAddress::IO_ADDRESS_FLAGS_MID:
+            logger->debug("FLAGS_MID write32 = {:08X}", data);
+
+            HW_INTC_FLAGS_MID &= ~data;
+            HW_INTC_RAWFLAGS_MID &= ~data;
+            break;
         case IoAddress::IO_ADDRESS_MASK_MID:
             logger->debug("MASK_MID write32 = {:08X}", data);
 
             HW_INTC_MASK_MID = data;
             HW_INTC_FLAGS_MID |= (HW_INTC_MASK_MID & HW_INTC_RAWFLAGS_MID);
+            break;
+        case IoAddress::IO_ADDRESS_FLAGS_HI:
+            logger->debug("FLAGS_HI write32 = {:08X}", data);
+
+            HW_INTC_FLAGS_HI &= ~data;
+            HW_INTC_RAWFLAGS_HI &= ~data;
             break;
         case IoAddress::IO_ADDRESS_MASK_HI:
             logger->debug("MASK_HI write32 = {:08X}", data);
