@@ -46,8 +46,11 @@ enum SysconCommand {
     SYSCON_COMMAND_READ_SCRATCHPAD        = 0x24,
     SYSCON_COMMAND_SEND_SETPARAM          = 0x25,
     SYSCON_COMMAND_CTRL_TACHYON_WDT       = 0x31,
+    SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING = 0x33,
+    SYSCON_COMMAND_CTRL_HR_POWER          = 0x34,
     SYSCON_COMMAND_CTRL_VOLTAGE           = 0x42,
     SYSCON_COMMAND_GET_POWER_STATUS       = 0x46,
+    SYSCON_COMMAND_CTRL_LED               = 0x47,
 };
 
 enum BufferIndex {
@@ -60,12 +63,15 @@ enum BufferIndex {
 };
 
 enum BaryonStatus {
-    BARYON_STATUS_AC_POWER = 0,
-    BARYON_STATUS_ALARM    = 3,
+    BARYON_STATUS_AC_POWER = 1 << 0,
+    BARYON_STATUS_ALARM    = 1 << 3,
+    BARYON_STATUS_HR_POWER = 1 << 4,
 };
 
 static struct {
     std::array<u8, SCRATCHPAD_SIZE> scratchpad;
+
+    u8 baryon_status;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -212,15 +218,35 @@ static void common_write(const u8 command) {
     }
 
     switch (command) {
+        case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
+            logger->debug("CTRL_TACHYON_WDT: {}", data);
+            break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
+            logger->debug("CTRL_ANALOG_XY_POLLING: {}", data);
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
             logger->debug("CTRL_VOLTAGE: {}", data);
             break;
-        case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
-            logger->debug("CTRL_TACHYON_WDT: {}", data);
+        case SysconCommand::SYSCON_COMMAND_CTRL_LED:
+            logger->debug("CTRL_LED: {}", data);
             break;
         default:
             logger->error("Unhandled common write for command {:02X}", command);
             exit(1);
+    }
+
+    write_transmit_data(nullptr, 0);
+}
+
+static void command_ctrl_hr_power() {
+    const bool hr_power = (receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 1) != 0;
+
+    logger->debug("CTRL_HR_POWER (HR power: {})", hr_power);
+
+    if (hr_power) {
+        ctx.baryon_status |= BaryonStatus::BARYON_STATUS_HR_POWER;
+    } else {
+        ctx.baryon_status &= ~BaryonStatus::BARYON_STATUS_HR_POWER;
     }
 
     write_transmit_data(nullptr, 0);
@@ -289,8 +315,13 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_SEND_SETPARAM:
             command_send_setparam();
             break;
-        case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
+        case SysconCommand::SYSCON_COMMAND_CTRL_HR_POWER:
+            command_ctrl_hr_power();
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
+        case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
+        case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
+        case SysconCommand::SYSCON_COMMAND_CTRL_LED:
             common_write(command);
             break;
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
@@ -308,7 +339,7 @@ static void start_command() {
     buf = transmit_buffer.buf;
 
     // Build response header (size already set by command)
-    buf[BufferIndex::BUFFER_INDEX_STATUS  ] = (1 << BaryonStatus::BARYON_STATUS_ALARM) | (1 << BaryonStatus::BARYON_STATUS_AC_POWER);
+    buf[BufferIndex::BUFFER_INDEX_STATUS  ] = ctx.baryon_status;
     buf[BufferIndex::BUFFER_INDEX_RESPONSE] = 0x82;
 
     // Calculate checksum
@@ -325,6 +356,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("SYSCON");
 
     std::memcpy(ctx.scratchpad.data(), INITIAL_SCRATCHPAD, SCRATCHPAD_SIZE);
+
+    ctx.baryon_status = BaryonStatus::BARYON_STATUS_ALARM | BaryonStatus::BARYON_STATUS_AC_POWER;
 }
 
 void soft_reset() {
