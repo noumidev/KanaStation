@@ -32,6 +32,7 @@
 #include <core/hw/systime.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
+#include <core/hw/uart/uart.hpp>
 
 namespace kanacore {
 
@@ -78,6 +79,7 @@ void initialize(const Configuration config) {
     hw::systime::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
+    hw::uart::initialize();
 
     // Set up system core memory handlers
     sc.read8   = hw::bus::read<common::u8>;
@@ -110,6 +112,7 @@ void soft_reset() {
     hw::systime::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
+    hw::uart::soft_reset();
 
     sc.soft_reset();
 }
@@ -134,6 +137,7 @@ void hard_reset() {
     hw::systime::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
+    hw::uart::hard_reset();
 
     sc.hard_reset();
 }
@@ -158,6 +162,7 @@ void shutdown() {
     hw::systime::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
+    hw::uart::shutdown();
 }
 
 hw::allegrex::Allegrex* get_sc_ptr() {

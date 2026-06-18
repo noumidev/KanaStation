@@ -47,6 +47,7 @@ set(SOURCES
     src/core/hw/allegrex/allegrex.cpp
     src/core/hw/allegrex/interpreter.cpp
     src/core/hw/allegrex/scratchpad.cpp
+    src/core/hw/uart/uart.cpp
     src/frontends/sdl/main.cpp
 )
 
@@ -74,6 +75,7 @@ set(HEADERS
     include/core/hw/allegrex/allegrex.hpp
     include/core/hw/allegrex/interpreter.hpp
     include/core/hw/allegrex/scratchpad.hpp
+    include/core/hw/uart/uart.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
