@@ -40,6 +40,8 @@ enum IoAddress {
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
     IO_ADDRESS_CLOCKEN_HI = SYSCTRL_ADDR + 0x058,
+    IO_ADDRESS_CLKSEL_LO  = SYSCTRL_ADDR + 0x05C,
+    IO_ADDRESS_CLKSEL_HI  = SYSCTRL_ADDR + 0x060,
     IO_ADDRESS_SPICLKSEL  = SYSCTRL_ADDR + 0x064,
     IO_ADDRESS_PLLCTRL    = SYSCTRL_ADDR + 0x068,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
@@ -55,6 +57,8 @@ enum IoAddress {
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
 #define HW_SYSCTRL_CLOCKEN_HI ctx.clock_enable[1]
+#define HW_SYSCTRL_CLKSEL_LO  ctx.clock_select[0]
+#define HW_SYSCTRL_CLKSEL_HI  ctx.clock_select[1]
 #define HW_SYSCTRL_SPICLKSEL  ctx.spi_clock_select
 #define HW_SYSCTRL_PLLCTRL    ctx.pll_control
 #define HW_SYSCTRL_IOEN       ctx.io_enable
@@ -82,6 +86,7 @@ static struct {
     u32 reset_enable;
     u32 busclock_enable;
     u32 clock_enable[2];
+    u32 clock_select[2];
     u32 spi_clock_select;
     u32 pll_control;
     u32 io_enable;
@@ -122,6 +127,12 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_CLOCKEN_HI:
             logger->debug("CLOCKEN_HI read32");
             return HW_SYSCTRL_CLOCKEN_HI;
+        case IoAddress::IO_ADDRESS_CLKSEL_LO:
+            logger->debug("CLKSEL_LO read32");
+            return HW_SYSCTRL_CLKSEL_LO;
+        case IoAddress::IO_ADDRESS_CLKSEL_HI:
+            logger->debug("CLKSEL_HI read32");
+            return HW_SYSCTRL_CLKSEL_HI;
         case IoAddress::IO_ADDRESS_SPICLKSEL:
             logger->debug("SPICLKSEL read32");
             return HW_SYSCTRL_SPICLKSEL;
@@ -141,6 +152,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_PLLMULT:
             logger->debug("PLLMULT read32");
             return HW_SYSCTRL_PLLMULT;
+        case SYSCTRL_ADDR + 0x03C:
+            logger->warn("Unmapped read32 @ {:08X}", addr);
+            return 0;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -208,6 +222,14 @@ static void write(const u32 addr, const u32 data) {
             // See above
             HW_SYSCTRL_CLOCKEN_HI = data;
             break;
+        case IoAddress::IO_ADDRESS_CLKSEL_LO:
+            logger->debug("CLKSEL_LO write32 = {:08X}", data);
+            HW_SYSCTRL_CLKSEL_LO = data;
+            break;
+        case IoAddress::IO_ADDRESS_CLKSEL_HI:
+            logger->debug("CLKSEL_HI write32 = {:08X}", data);
+            HW_SYSCTRL_CLKSEL_HI = data;
+            break;
         case IoAddress::IO_ADDRESS_SPICLKSEL:
             logger->debug("SPICLKSEL write32 = {:08X}", data);
 
@@ -222,6 +244,9 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_GPIOEN:
             logger->debug("GPIOEN write32 = {:08X}", data);
             HW_SYSCTRL_GPIOEN = data;
+            break;
+        case SYSCTRL_ADDR + 0x03C:
+            logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
