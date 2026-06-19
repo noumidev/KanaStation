@@ -67,6 +67,7 @@ enum IoAddress {
 
 enum ResetDevice {
     RESET_DEVICE_SC  = 1,
+    RESET_DEVICE_ME  = 2,
     RESET_DEVICE_NUM = 17,
     RESET_DEVICE_ALL = (1 << ResetDevice::RESET_DEVICE_NUM) - 1,
 };
@@ -95,12 +96,15 @@ static struct {
 } ctx;
 
 static void reset_sc() {
-    // This might just be the same as a hard reset, but whatever
     get_sc_ptr()->soft_reset();
 
     // This unmaps the 4 KB scratchpad and boot ROM and maps shared RAM to the reset vector
     boot_rom::soft_reset();
     shared_ram::soft_reset();
+}
+
+static void reset_me() {
+    get_me_ptr()->soft_reset();
 }
 
 static u32 read(const u32 addr) {
@@ -260,6 +264,7 @@ void initialize() {
     reset_funcs.fill(nullptr);
 
     reset_funcs[ResetDevice::RESET_DEVICE_SC] = reset_sc;
+    reset_funcs[ResetDevice::RESET_DEVICE_ME] = reset_me;
 
     std::memset(&ctx, 0, sizeof(ctx));
 
