@@ -27,7 +27,8 @@ using namespace common;
 
 static std::shared_ptr<spdlog::logger> logger;
 
-constexpr i64 MAX_CYCLES = 512;
+constexpr i64 MAX_CYCLES  = 512;
+constexpr i64 SYNC_CYCLES = 128;
 
 static constexpr const char* EVENT_TYPE_NAMES[] = {
     "KIRK 1st phase",
@@ -45,10 +46,6 @@ struct Event {
 
     int arg;
     i64 timestamp;
-
-    bool operator>(const Event &other) const {
-        return timestamp > other.timestamp;
-    }
 };
 
 typedef std::vector<Event> EventQueue;
@@ -97,7 +94,7 @@ void schedule_event(const EventType type, Callback callback, const int arg, cons
 
     std::sort(event_queue.begin(), event_queue.end(),
         [](const Event& a, const Event& b) {
-            return a > b; 
+            return a.timestamp > b.timestamp; 
         }
     );
 
@@ -124,17 +121,30 @@ void cancel_event(const EventType type) {
 
 bool run() {
     hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
+    hw::allegrex::Allegrex* me = kanacore::get_me_ptr();
 
     if (event_queue.empty()) {
-        global_timestamp = *sc->get_cycles() + MAX_CYCLES;
+        global_timestamp = std::max(*sc->get_cycles(), *me->get_cycles()) + MAX_CYCLES;
     } else {
         global_timestamp = event_queue.back().timestamp;
     }
 
-    hw::allegrex::interpreter::run(sc, global_timestamp);
+    while ((*sc->get_cycles() < global_timestamp) || (*me->get_cycles() < global_timestamp)) {
+        const i64 sc_cycles = *sc->get_cycles();
+        const i64 me_cycles = *me->get_cycles();
+
+        // Step the CPU that's behind
+        if (sc_cycles <= me_cycles) {
+            hw::allegrex::interpreter::run(sc, std::min(me_cycles + SYNC_CYCLES, global_timestamp));
+        } else {
+            hw::allegrex::interpreter::run(me, std::min(sc_cycles + SYNC_CYCLES, global_timestamp));
+        }
+    }
+
+    const i64 new_timestamp = std::min(*sc->get_cycles(), *me->get_cycles());
 
     // Process all events with an expired timestamp
-    while (!event_queue.empty() && (event_queue.back().timestamp <= *sc->get_cycles())) {
+    while (!event_queue.empty() && (event_queue.back().timestamp <= new_timestamp)) {
         const Event event = event_queue.back();
         event_queue.pop_back();
 
