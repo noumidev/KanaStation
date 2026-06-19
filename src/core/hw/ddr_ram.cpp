@@ -63,6 +63,7 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(RAM_ADDR, RAM_SIZE, page_desc);
+    kanacore::get_me_bus_ptr()->map(RAM_ADDR, RAM_SIZE, page_desc);
 }
 
 void shutdown() {

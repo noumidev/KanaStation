@@ -65,6 +65,7 @@ void soft_reset() {
     // Unmaps scratchpad, maps shared RAM where the boot ROM used to be
     kanacore::get_sc_bus_ptr()->unmap(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE);
     kanacore::get_sc_bus_ptr()->map(SHARED_RAM_ADDR, SHARED_RAM_SIZE, page_desc);
+    kanacore::get_me_bus_ptr()->map(SHARED_RAM_ADDR, SHARED_RAM_SIZE, page_desc);
 
     // Because our address decoding logic doesn't recognize that the scratchpad
     // area is the first 4 KB of shared RAM, we manually move said area to the beginning
