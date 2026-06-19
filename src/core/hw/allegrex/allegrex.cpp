@@ -234,6 +234,9 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
         case Cp0::StatusRegister::STATUS_REGISTER_SCCODE:
             data = cp0.sccode;
             break;
+        case Cp0::StatusRegister::STATUS_REGISTER_CPUID:
+            data = cpu_id;
+            break;
         case Cp0::StatusRegister::STATUS_REGISTER_EBASE:
             data = cp0.ebase;
             break;
