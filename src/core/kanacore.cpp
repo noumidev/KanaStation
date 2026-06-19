@@ -158,6 +158,7 @@ void soft_reset() {
     hw::uart::soft_reset();
 
     sc.soft_reset();
+    me.soft_reset();
 }
 
 void hard_reset() {
@@ -182,6 +183,10 @@ void hard_reset() {
     hw::uart::hard_reset();
 
     sc.hard_reset();
+    me.hard_reset();
+
+    // Halt ME until SC resets it
+    me.wait_for_interrupt();
 
     scheduler::schedule_event(
         scheduler::EventType::VSYNC,
