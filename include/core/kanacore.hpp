@@ -8,6 +8,7 @@
 #pragma once
 
 #include <core/config.hpp>
+#include <core/hw/bus.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 
 namespace kanacore {
@@ -18,6 +19,10 @@ void hard_reset();
 void shutdown();
 
 hw::allegrex::Allegrex* get_sc_ptr();
+hw::allegrex::Allegrex* get_me_ptr();
+
+hw::bus::Bus* get_sc_bus_ptr();
+hw::bus::Bus* get_me_bus_ptr();
 
 void run();
 

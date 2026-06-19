@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::shared_ram {
@@ -62,8 +63,8 @@ void soft_reset() {
     };
 
     // Unmaps scratchpad, maps shared RAM where the boot ROM used to be
-    bus::unmap(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE);
-    bus::map(SHARED_RAM_ADDR, SHARED_RAM_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->unmap(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE);
+    kanacore::get_sc_bus_ptr()->map(SHARED_RAM_ADDR, SHARED_RAM_SIZE, page_desc);
 
     // Because our address decoding logic doesn't recognize that the scratchpad
     // area is the first 4 KB of shared RAM, we manually move said area to the beginning
@@ -82,7 +83,7 @@ void hard_reset() {
     };
 
     // This is first mapped as a 4 KB scratchpad for SC
-    bus::map(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE, page_desc);
 }
 
 void shutdown() {

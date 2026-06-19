@@ -17,6 +17,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::uart {
@@ -258,7 +259,7 @@ static void map(const u32 addr) {
         .write32_func = write<uart_num>,
     };
 
-    bus::map(addr, UART_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(addr, UART_SIZE, page_desc);
 }
 
 void initialize() {

@@ -277,7 +277,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(SYSCTRL_ADDR, SYSCTRL_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(SYSCTRL_ADDR, SYSCTRL_SIZE, page_desc);
 
     // Things to consider:
     // Media Engine has its own set of SYSCTRL registers here, how do we deal with this?

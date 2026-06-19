@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::allegrex::scratchpad {
@@ -61,7 +62,7 @@ void hard_reset() {
         .write32_func = write<u32>,
     };
 
-    bus::map(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(SCRATCHPAD_ADDR, SCRATCHPAD_SIZE, page_desc);
 }
 
 void shutdown() {

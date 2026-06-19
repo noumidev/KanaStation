@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::audio {
@@ -69,7 +70,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(AUDIO_ADDR, AUDIO_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(AUDIO_ADDR, AUDIO_SIZE, page_desc);
 }
 
 void shutdown() {

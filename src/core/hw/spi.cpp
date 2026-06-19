@@ -16,6 +16,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/syscon.hpp>
@@ -286,7 +287,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(SPI_ADDR, SPI_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(SPI_ADDR, SPI_SIZE, page_desc);
 
     update_fifo_status();
 }

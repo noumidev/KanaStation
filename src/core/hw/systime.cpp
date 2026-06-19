@@ -161,7 +161,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(SYSTIME_ADDR, SYSTIME_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(SYSTIME_ADDR, SYSTIME_SIZE, page_desc);
 }
 
 void shutdown() {

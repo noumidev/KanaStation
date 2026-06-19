@@ -7,6 +7,7 @@
 
 #include <core/kanacore.hpp>
 
+#include <array>
 #include <cstdlib>
 #include <memory>
 
@@ -36,9 +37,33 @@
 
 namespace kanacore {
 
+using namespace common;
+
+constexpr u64 NUM_BUSES = 2;
+
 static std::shared_ptr<spdlog::logger> logger;
 
 static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
+static hw::allegrex::Allegrex me(hw::allegrex::CpuId::CPU_ID_ME);
+
+static std::array<hw::bus::Bus, NUM_BUSES> buses = {
+    hw::bus::Bus("Bus"),
+    hw::bus::Bus("ME Bus"),
+};
+
+template<typename T, int bus_num>
+static T read(const u32 addr) {
+    static_assert(bus_num < NUM_BUSES);
+
+    return buses[bus_num].read<T>(addr);
+}
+
+template<typename T, int bus_num>
+static void write(const u32 addr, const T data) {
+    static_assert(bus_num < NUM_BUSES);
+
+    return buses[bus_num].write<T>(addr, data);
+}
 
 // Move this to display code later on
 static void vsync(const int) {
@@ -74,7 +99,6 @@ void initialize(const Configuration config) {
     }
 
     scheduler::initialize();
-    hw::bus::initialize();
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::ddr_ram::initialize();
@@ -94,12 +118,20 @@ void initialize(const Configuration config) {
     hw::uart::initialize();
 
     // Set up system core memory handlers
-    sc.read8   = hw::bus::read<common::u8>;
-    sc.read16  = hw::bus::read<common::u16>;
-    sc.read32  = hw::bus::read<common::u32>;
-    sc.write8  = hw::bus::write<common::u8>;
-    sc.write16 = hw::bus::write<common::u16>;
-    sc.write32 = hw::bus::write<common::u32>;
+    sc.read8   = read<u8, 0>;
+    sc.read16  = read<u16, 0>;
+    sc.read32  = read<u32, 0>;
+    sc.write8  = write<u8, 0>;
+    sc.write16 = write<u16, 0>;
+    sc.write32 = write<u32, 0>;
+
+    // Set up MediaEngine memory handlers
+    me.read8   = read<u8, 1>;
+    me.read16  = read<u16, 1>;
+    me.read32  = read<u32, 1>;
+    me.write8  = write<u8, 1>;
+    me.write16 = write<u16, 1>;
+    me.write32 = write<u32, 1>;
 
     IS_INITIALIZED = true;
 }
@@ -107,7 +139,6 @@ void initialize(const Configuration config) {
 void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
     scheduler::soft_reset();
-    hw::bus::soft_reset();
     hw::audio::soft_reset();
     hw::boot_rom::soft_reset();
     hw::ddr_ram::soft_reset();
@@ -132,7 +163,6 @@ void soft_reset() {
 void hard_reset() {
     // This should hard reset all components (including memory)
     scheduler::hard_reset();
-    hw::bus::hard_reset();
     hw::audio::hard_reset();
     hw::boot_rom::hard_reset();
     hw::ddr_ram::hard_reset();
@@ -164,7 +194,6 @@ void hard_reset() {
 void shutdown() {
     // This shuts down all components
     scheduler::shutdown();
-    hw::bus::shutdown();
     hw::audio::shutdown();
     hw::boot_rom::shutdown();
     hw::ddr_ram::shutdown();
@@ -186,6 +215,18 @@ void shutdown() {
 
 hw::allegrex::Allegrex* get_sc_ptr() {
     return &sc;
+}
+
+hw::allegrex::Allegrex* get_me_ptr() {
+    return &me;
+}
+
+hw::bus::Bus* get_sc_bus_ptr() {
+    return &buses[0];
+}
+
+hw::bus::Bus* get_me_bus_ptr() {
+    return &buses[1];
 }
 
 void run() {

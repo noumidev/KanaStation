@@ -173,7 +173,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(INTC_ADDR, INTC_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(INTC_ADDR, INTC_SIZE, page_desc);
 }
 
 void shutdown() {

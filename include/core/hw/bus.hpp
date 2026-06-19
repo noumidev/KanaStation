@@ -7,6 +7,11 @@
 
 #pragma once
 
+#include <array>
+
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+
 #include <common/types.hpp>
 
 namespace kanacore::hw::bus {
@@ -17,6 +22,13 @@ using ReadHandler32  = common::u32 (*)(const common::u32);
 using WriteHandler8  = void (*)(const common::u32, const common::u8);
 using WriteHandler16 = void (*)(const common::u32, const common::u16);
 using WriteHandler32 = void (*)(const common::u32, const common::u32);
+
+// 512 MB physical address space
+constexpr common::u64 ADDRESS_SPACE = 0x20000000;
+
+constexpr common::u64 PAGE_SIZE = 0x1000;
+constexpr common::u64 PAGE_MASK = PAGE_SIZE - 1;
+constexpr common::u64 NUM_PAGES = ADDRESS_SPACE / PAGE_SIZE;
 
 // This describes all read/write handlers for a page (or more)
 struct PageDescriptor {
@@ -29,20 +41,27 @@ struct PageDescriptor {
     WriteHandler32 write32_func;
 };
 
-void initialize();
-void soft_reset();
-void hard_reset();
-void shutdown();
+// SC and ME bus
+class Bus {
+private:
+    std::shared_ptr<spdlog::logger> logger;
 
-template<typename T>
-T read(const common::u32 addr);
+    std::array<PageDescriptor, NUM_PAGES> page_table;
 
-template<typename T>
-void write(const common::u32 addr, const T data);
+public:
+    Bus(const char* bus_name);
+    ~Bus();
 
-// Maps read/write handlers 
-void map(const common::u32 addr, const common::u32 size, const PageDescriptor page_desc);
+    template<typename T>
+    T read(const common::u32 addr);
 
-void unmap(const common::u32 addr, const common::u32 size);
+    template<typename T>
+    void write(const common::u32 addr, const T data);
+
+    // Maps read/write handlers 
+    void map(const common::u32 addr, const common::u32 size, const PageDescriptor page_desc);
+
+    void unmap(const common::u32 addr, const common::u32 size);
+};
 
 };

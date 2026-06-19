@@ -16,6 +16,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
@@ -249,7 +250,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(I2C_ADDR, I2C_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(I2C_ADDR, I2C_SIZE, page_desc);
 }
 
 void shutdown() {

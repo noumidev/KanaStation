@@ -9,7 +9,6 @@
 
 #include <array>
 #include <cstdlib>
-#include <memory>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -18,40 +17,18 @@ namespace kanacore::hw::bus {
 
 using namespace common;
 
-// 512 MB physical address space
-constexpr u64 ADDRESS_SPACE = 0x20000000;
+Bus::Bus(const char* bus_name) {
+    logger = spdlog::stdout_color_st(bus_name);
 
-constexpr u64 PAGE_SIZE = 0x1000;
-constexpr u64 PAGE_MASK = PAGE_SIZE - 1;
-constexpr u64 NUM_PAGES = ADDRESS_SPACE / PAGE_SIZE;
-
-static std::shared_ptr<spdlog::logger> logger;
-
-static std::array<PageDescriptor, NUM_PAGES> page_table;
-
-void initialize() {
-    logger = spdlog::stdout_color_st("Bus");
-}
-
-void soft_reset() {
-
-}
-
-void hard_reset() {
-    // Clear all memory mappings
     page_table.fill(PageDescriptor{});
 }
 
-void shutdown() {
-
-}
-
-void run() {
-    // This runs all components
+Bus::~Bus() {
+    
 }
 
 template<>
-u8 read(const u32 addr) {
+u8 Bus::read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("read8 address out of bounds ({:08X})", addr);
         exit(1);
@@ -68,7 +45,7 @@ u8 read(const u32 addr) {
 }
 
 template<>
-u16 read(const u32 addr) {
+u16 Bus::read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("read16 address out of bounds ({:08X})", addr);
         exit(1);
@@ -85,7 +62,7 @@ u16 read(const u32 addr) {
 }
 
 template<>
-u32 read(const u32 addr) {
+u32 Bus::read(const u32 addr) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("read32 address out of bounds ({:08X})", addr);
         exit(1);
@@ -102,7 +79,7 @@ u32 read(const u32 addr) {
 }
 
 template<>
-void write(const u32 addr, const u8 data) {
+void Bus::write(const u32 addr, const u8 data) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("write8 address out of bounds ({:08X})", addr);
         exit(1);
@@ -119,7 +96,7 @@ void write(const u32 addr, const u8 data) {
 }
 
 template<>
-void write(const u32 addr, const u16 data) {
+void Bus::write(const u32 addr, const u16 data) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("write16 address out of bounds ({:08X})", addr);
         exit(1);
@@ -136,7 +113,7 @@ void write(const u32 addr, const u16 data) {
 }
 
 template<>
-void write(const u32 addr, const u32 data) {
+void Bus::write(const u32 addr, const u32 data) {
     if (addr >= ADDRESS_SPACE) {
         logger->error("write32 address out of bounds ({:08X})", addr);
         exit(1);
@@ -152,7 +129,7 @@ void write(const u32 addr, const u32 data) {
     write32_func(addr, data);
 }
 
-void map(const u32 addr, const u32 size, const PageDescriptor page_desc) {
+void Bus::map(const u32 addr, const u32 size, const PageDescriptor page_desc) {
     if ((addr & PAGE_MASK) != 0) {
         logger->error("Address not aligned on a page boundary {:08X}", addr);
         exit(1);
@@ -172,7 +149,7 @@ void map(const u32 addr, const u32 size, const PageDescriptor page_desc) {
     }
 }
 
-void unmap(const u32 addr, const u32 size) {
+void Bus::unmap(const u32 addr, const u32 size) {
     if ((addr & PAGE_MASK) != 0) {
         logger->error("Address not aligned on a page boundary {:08X}", addr);
         exit(1);

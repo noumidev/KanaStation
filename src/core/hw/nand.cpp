@@ -18,6 +18,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
@@ -421,7 +422,7 @@ static u32 read_dma_buffer(const u32 addr) {
         }
     }
 
-    logger->debug("DMA buffer read32 @ {:08X}", addr);
+    // logger->debug("DMA buffer read32 @ {:08X}", addr);
     return data;
 }
 
@@ -580,7 +581,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(NAND_INTERFACE_ADDR, NAND_INTERFACE_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(NAND_INTERFACE_ADDR, NAND_INTERFACE_SIZE, page_desc);
 
     const bus::PageDescriptor dma_page_desc {
         // See above
@@ -588,7 +589,7 @@ void hard_reset() {
         .write32_func = write_dma_buffer,
     };
 
-    bus::map(DMA_BUFFER_ADDR, DMA_BUFFER_SIZE, dma_page_desc);
+    kanacore::get_sc_bus_ptr()->map(DMA_BUFFER_ADDR, DMA_BUFFER_SIZE, dma_page_desc);
 
     reset_nand_chip();
     reset_nand_interface();

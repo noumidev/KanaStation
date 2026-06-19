@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
 #include <core/hw/syscon.hpp>
@@ -256,7 +257,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(GPIO_ADDR, GPIO_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(GPIO_ADDR, GPIO_SIZE, page_desc);
 }
 
 void shutdown() {

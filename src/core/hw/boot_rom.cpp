@@ -18,6 +18,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
 namespace kanacore::hw::boot_rom {
@@ -73,7 +74,7 @@ void initialize(const char* boot_path) {
 
 void soft_reset() {
     // Unmaps boot ROM after SC reset
-    bus::unmap(BOOT_ROM_ADDR, BOOT_ROM_SIZE);
+    kanacore::get_sc_bus_ptr()->unmap(BOOT_ROM_ADDR, BOOT_ROM_SIZE);
 }
 
 void hard_reset() {
@@ -84,7 +85,7 @@ void hard_reset() {
         // Boot ROM can't be written to, so we won't supply write handlers
     };
 
-    bus::map(BOOT_ROM_ADDR, BOOT_ROM_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(BOOT_ROM_ADDR, BOOT_ROM_SIZE, page_desc);
 }
 
 void shutdown() {

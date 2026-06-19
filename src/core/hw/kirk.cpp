@@ -24,6 +24,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <common/types.hpp>
+#include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
@@ -249,16 +250,20 @@ static inline u32 align_up(const u32 data) {
 }
 
 static void dma_read(const u32 addr, u8* data, const u32 size) {
+    bus::Bus* sc_bus = kanacore::get_sc_bus_ptr();
+
     // Sad, let's optimize this at some point
     for (u32 i = 0; i < size; i++) {
-        data[i] = bus::read<u8>(addr + i);
+        data[i] = sc_bus->read<u8>(addr + i);
     }
 }
 
 static void dma_write(const u32 addr, const u8* data, const u32 size) {
+    bus::Bus* sc_bus = kanacore::get_sc_bus_ptr();
+
     // See above
     for (u32 i = 0; i < size; i++) {
-        bus::write<u8>(addr + i, data[i]);
+        sc_bus->write<u8>(addr + i, data[i]);
     }
 }
 
@@ -563,7 +568,7 @@ void hard_reset() {
         .write32_func = write,
     };
 
-    bus::map(KIRK_ADDR, KIRK_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(KIRK_ADDR, KIRK_SIZE, page_desc);
 }
 
 void shutdown() {
