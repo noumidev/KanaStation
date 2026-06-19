@@ -938,11 +938,6 @@ void shutdown() {
 }
 
 void run(Allegrex* cpu, const i64 target_timestamp) {
-    if (cpu->get_cpu_id() == CpuId::CPU_ID_ME) {
-        cpu->get_logger()->error("Media Engine not implemented");
-        exit(1);
-    }
-
     if (!cpu->is_running()) {
         *cpu->get_cycles() = target_timestamp;
         return;
