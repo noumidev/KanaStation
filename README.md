@@ -1,5 +1,12 @@
 # KanaStation - PlayStation Portable emulator
 
+## Progress
+- boots PSP-1000 boot ROM
+- boots OFW 1.50 IPL
+- boots kernel up until MeBooter
+
+This is a **work-in-progress** and very early!
+
 ## Usage
 `KanaStation [path to boot ROM] [path to NAND dump]`
 
