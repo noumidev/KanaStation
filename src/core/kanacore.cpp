@@ -33,6 +33,7 @@
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
 #include <core/hw/me/scratchpad.hpp>
+#include <core/hw/me/vme_dmac.hpp>
 #include <core/hw/uart/uart.hpp>
 
 namespace kanacore {
@@ -95,6 +96,7 @@ void initialize(const Configuration config) {
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
     hw::me::scratchpad::initialize();
+    hw::me::vme_dmac::initialize();
     hw::uart::initialize();
 
     IS_INITIALIZED = true;
@@ -120,6 +122,7 @@ void soft_reset() {
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
     hw::me::scratchpad::soft_reset();
+    hw::me::vme_dmac::soft_reset();
     hw::uart::soft_reset();
 
     sc.soft_reset();
@@ -146,6 +149,7 @@ void hard_reset() {
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
     hw::me::scratchpad::hard_reset();
+    hw::me::vme_dmac::hard_reset();
     hw::uart::hard_reset();
 
     sc.hard_reset();
@@ -182,6 +186,7 @@ void shutdown() {
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
     hw::me::scratchpad::shutdown();
+    hw::me::vme_dmac::shutdown();
     hw::uart::shutdown();
 }
 

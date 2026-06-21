@@ -26,6 +26,7 @@ enum EventType {
     SYSCON_TX,
     I2C,
     NAND_DMA,
+    VME_DMA,
     SYSTIME,
     VSYNC,
     NUM_EVENT_TYPES,
