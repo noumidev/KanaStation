@@ -152,8 +152,9 @@ enum Cp0Opcode {
 };
 
 enum FpuOpcode {
-    FPU_OPCODE_MUL  = 0x02,
-    FPU_OPCODE_CVTS = 0x20,
+    FPU_OPCODE_MUL    = 0x02,
+    FPU_OPCODE_TRUNCW = 0x0D,
+    FPU_OPCODE_CVTS   = 0x20,
 };
 
 enum BitShuffleOpcode {
@@ -673,6 +674,11 @@ static i64 i_syscall(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_truncw(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr_raw(FD, (u32)std::truncf(cpu->get_fgr(FS)));
+    return 1;
+}
+
 static i64 i_xor(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RS) ^ cpu->get_reg(RT));
     return 1;
@@ -737,6 +743,8 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                 switch (FUNCT) {
                     case FpuOpcode::FPU_OPCODE_MUL:
                         return i_fmul(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_TRUNCW:
+                        return i_truncw(cpu, instr);
                     default:
                         cpu->get_logger()->error("Undefined FPU SINGLE instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
                         cpu->dump_state();
