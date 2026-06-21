@@ -77,7 +77,7 @@ static void end_transmission_reception(const int) {
 
     HW_I2C_INTRSTAT |= 1;
 
-    intc::assert_interrupt(I2C_INTERRUPT);
+    intc::assert_sc_interrupt(I2C_INTERRUPT);
 }
 
 static void start_transmission() {
@@ -210,7 +210,7 @@ static void write(const u32 addr, const u32 data) {
 
             HW_I2C_INTRSTAT &= ~data;
 
-            intc::clear_interrupt(I2C_INTERRUPT);
+            intc::clear_sc_interrupt(I2C_INTERRUPT);
             break;
         case I2C_ADDR + 0x010:
         case I2C_ADDR + 0x014:

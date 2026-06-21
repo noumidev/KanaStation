@@ -222,7 +222,7 @@ static void reset_nand_interface() {
     // Does this reset the chip?
     state = NandState::NAND_STATE_IDLE;
 
-    intc::clear_interrupt(NAND_INTERRUPT);
+    intc::clear_sc_interrupt(NAND_INTERRUPT);
 }
 
 static void command_erase_block() {
@@ -317,7 +317,7 @@ static void assert_dma_interrupt(const bool is_write) {
     HW_NAND_DMAINTR.other = 0x3;
     HW_NAND_DMAINTR.flags = 1 << is_write;
 
-    intc::assert_interrupt(NAND_INTERRUPT);
+    intc::assert_sc_interrupt(NAND_INTERRUPT);
 }
 
 static void end_dma(const int is_write) {
@@ -497,7 +497,7 @@ static void write(const u32 addr, const u32 data) {
             HW_NAND_DMAINTR.flags &= ~(data & 3);
 
             if (HW_NAND_DMAINTR.flags == 0) {
-                intc::clear_interrupt(NAND_INTERRUPT);
+                intc::clear_sc_interrupt(NAND_INTERRUPT);
             }
             break;
         case IoAddress::IO_ADDRESS_RESUME:

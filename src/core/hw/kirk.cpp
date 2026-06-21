@@ -456,7 +456,7 @@ static void end_first_phase(const int result) {
 
     HW_KIRK_RESULT = result;
 
-    intc::assert_interrupt(KIRK_INTERRUPT);
+    intc::assert_sc_interrupt(KIRK_INTERRUPT);
 }
 
 static void start_first_phase() {
@@ -529,7 +529,7 @@ static void write(const u32 addr, const u32 data) {
             break;
         case IoAddress::IO_ADDRESS_STATEND:
             logger->debug("STATEND write32 = {:08X}", data);
-            intc::clear_interrupt(KIRK_INTERRUPT);
+            intc::clear_sc_interrupt(KIRK_INTERRUPT);
             break;
         case IoAddress::IO_ADDRESS_SRCADDR:
             logger->debug("SRCADDR write32 = {:08X}", data);

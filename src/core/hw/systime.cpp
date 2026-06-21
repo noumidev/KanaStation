@@ -54,7 +54,7 @@ static struct {
 } ctx;
 
 static void alarm(const int) {
-    intc::assert_interrupt(SYSTIME_INTERRUPT);
+    intc::assert_sc_interrupt(SYSTIME_INTERRUPT);
 }
 
 static u32 get_counter() {
@@ -94,7 +94,7 @@ static void set_counter(const u32 data) {
 }
 
 static void set_alarm(const u32 data) {
-    intc::clear_interrupt(SYSTIME_INTERRUPT);
+    intc::clear_sc_interrupt(SYSTIME_INTERRUPT);
 
     HW_SYSCTRL_ALARM = data;
 

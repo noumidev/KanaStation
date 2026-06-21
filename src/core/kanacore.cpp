@@ -46,7 +46,7 @@ static hw::allegrex::Allegrex me(hw::allegrex::CpuId::CPU_ID_ME);
 
 // Move this to display code later on
 static void vsync(const int) {
-    hw::intc::assert_interrupt(30);
+    hw::intc::assert_sc_interrupt(30);
 
     scheduler::schedule_event(
         scheduler::EventType::VSYNC,

@@ -88,9 +88,9 @@ static const char* get_pin_name(const u32 pin) {
 
 static void check_pending_interrupts() {
     if ((HW_GPIO_INTRMASK & HW_GPIO_INTRSTAT) != 0) {
-        intc::assert_interrupt(GPIO_INTERRUPT);
+        intc::assert_sc_interrupt(GPIO_INTERRUPT);
     } else {
-        intc::clear_interrupt(GPIO_INTERRUPT);
+        intc::clear_sc_interrupt(GPIO_INTERRUPT);
     }
 }
 

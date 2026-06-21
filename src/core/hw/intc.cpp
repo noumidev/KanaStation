@@ -7,10 +7,11 @@
 
 #include <core/hw/intc.hpp>
 
+#include <array>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
+#include <string>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -26,7 +27,7 @@ using namespace common;
 constexpr u64 INTC_ADDR = 0x1C300000;
 constexpr u64 INTC_SIZE = 0x1000;
 
-constexpr u64 NUM_REGS = 3;
+constexpr u64 NUM_INTCS = 2;
 
 enum IoAddress {
     IO_ADDRESS_FLAGS_LO     = INTC_ADDR + 0x000,
@@ -40,42 +41,41 @@ enum IoAddress {
     IO_ADDRESS_MASK_HI      = INTC_ADDR + 0x028,
 };
 
-#define HW_INTC_FLAGS        ctx.flags
-#define HW_INTC_FLAGS_LO     ctx.flags[0]
-#define HW_INTC_FLAGS_MID    ctx.flags[1]
-#define HW_INTC_FLAGS_HI     ctx.flags[2]
-#define HW_INTC_RAWFLAGS     ctx.raw_flags
-#define HW_INTC_RAWFLAGS_LO  ctx.raw_flags[0]
-#define HW_INTC_RAWFLAGS_MID ctx.raw_flags[1]
-#define HW_INTC_RAWFLAGS_HI  ctx.raw_flags[2]
-#define HW_INTC_MASK         ctx.mask
-#define HW_INTC_MASK_LO      ctx.mask[0]
-#define HW_INTC_MASK_MID     ctx.mask[1]
-#define HW_INTC_MASK_HI      ctx.mask[2]
+#define HW_INTC_FLAGS        flags[reg_idx]
+#define HW_INTC_FLAGS_LO     flags[0]
+#define HW_INTC_FLAGS_MID    flags[1]
+#define HW_INTC_FLAGS_HI     flags[2]
+#define HW_INTC_RAWFLAGS     raw_flags[reg_idx]
+#define HW_INTC_RAWFLAGS_LO  raw_flags[0]
+#define HW_INTC_RAWFLAGS_MID raw_flags[1]
+#define HW_INTC_RAWFLAGS_HI  raw_flags[2]
+#define HW_INTC_MASK         mask[reg_idx]
+#define HW_INTC_MASK_LO      mask[0]
+#define HW_INTC_MASK_MID     mask[1]
+#define HW_INTC_MASK_HI      mask[2]
 
-static struct {
-    u32 flags[NUM_REGS];
-    u32 raw_flags[NUM_REGS];
-    u32 mask[NUM_REGS];
-} ctx;
+Intc::Intc(const char* intc_name, hw::allegrex::Allegrex* cpu)
+    : logger(spdlog::stdout_color_st(std::string(intc_name))), cpu(cpu) {
 
-static std::shared_ptr<spdlog::logger> logger;
+}
 
-static void check_pending_interrupts() {
-    hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
+Intc::~Intc() {
 
+}
+
+void Intc::check_pending_interrupts() {
     if (
-        ((HW_INTC_FLAGS[0] & HW_INTC_MASK[0]) != 0) ||
-        ((HW_INTC_FLAGS[1] & HW_INTC_MASK[1]) != 0) ||
-        ((HW_INTC_FLAGS[2] & HW_INTC_MASK[2]) != 0)
+        ((HW_INTC_FLAGS_LO  & HW_INTC_MASK_LO ) != 0) ||
+        ((HW_INTC_FLAGS_MID & HW_INTC_MASK_MID) != 0) ||
+        ((HW_INTC_FLAGS_HI  & HW_INTC_MASK_HI ) != 0)
     ) {
-        sc->assert_interrupt();
+        cpu->assert_interrupt();
     } else {
-        sc->clear_interrupt();
+        cpu->clear_interrupt();
     }
 }
 
-static u32 read(const u32 addr) {
+u32 Intc::read(const u32 addr) const {
     switch (addr) {
         case IoAddress::IO_ADDRESS_FLAGS_LO:
             logger->debug("FLAGS_LO read32");
@@ -110,7 +110,7 @@ static u32 read(const u32 addr) {
     }
 }
 
-static void write(const u32 addr, const u32 data) {
+void Intc::write(const u32 addr, const u32 data) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_FLAGS_LO:
             logger->debug("FLAGS_LO write32 = {:08X}", data);
@@ -156,9 +156,72 @@ static void write(const u32 addr, const u32 data) {
     check_pending_interrupts();
 }
 
-void initialize() {
-    logger = spdlog::stdout_color_st("INTC");
+void Intc::assert_interrupt(const int intr_num) {
+    logger->debug("Interrupt {} asserted", intr_num);
 
+    const int reg_idx = intr_num >> 5;
+    const int intr_bit = 1 << (intr_num & 31);
+
+    assert((u64)reg_idx < NUM_REGS);
+
+    HW_INTC_RAWFLAGS |= intr_bit;
+
+    if ((HW_INTC_MASK & intr_bit) != 0) {
+        HW_INTC_FLAGS |= intr_bit;
+
+        cpu->assert_interrupt();
+    }
+}
+
+void Intc::clear_interrupt(const int intr_num) {
+    logger->debug("Interrupt {} cleared", intr_num);
+
+    const int reg_idx = intr_num >> 5;
+    const int intr_bit = 1 << (intr_num & 31);
+
+    assert((u64)reg_idx < NUM_REGS);
+
+    HW_INTC_FLAGS &= ~intr_bit;
+    HW_INTC_RAWFLAGS &= ~intr_bit;
+    
+    check_pending_interrupts();
+}
+
+static struct {} ctx;
+
+static std::array<Intc, NUM_INTCS> intcs = {
+    Intc("INTC", kanacore::get_sc_ptr()),
+    Intc("ME INTC", kanacore::get_me_ptr()),
+};
+
+template<int intc_num>
+static u32 read(const u32 addr) {
+    static_assert(intc_num < NUM_INTCS);
+
+    return intcs[intc_num].read(addr);
+}
+
+template<int intc_num>
+static void write(const u32 addr, const u32 data) {
+    static_assert(intc_num < NUM_INTCS);
+
+    intcs[intc_num].write(addr, data);
+}
+
+template<int intc_num>
+static void map() {
+    static_assert(intc_num < NUM_INTCS);
+
+    const bus::PageDescriptor page_desc {
+        // To my knowledge, INTC I/O is never not read/written using 32-bit accesses
+        .read32_func  = read<intc_num>,
+        .write32_func = write<intc_num>,
+    };
+
+    intcs[intc_num].cpu->get_bus_ptr()->map(INTC_ADDR, INTC_SIZE, page_desc);
+}
+
+void initialize() {
     std::memset(&ctx, 0, sizeof(ctx));
 }
 
@@ -167,55 +230,28 @@ void soft_reset() {
 }
 
 void hard_reset() {
-    const bus::PageDescriptor page_desc {
-        // To my knowledge, INTC I/O is never not read/written using 32-bit accesses
-        .read32_func  = read,
-        .write32_func = write,
-    };
-
-    kanacore::get_sc_bus_ptr()->map(INTC_ADDR, INTC_SIZE, page_desc);
+    map<0>();
+    map<1>();
 }
 
 void shutdown() {
 
 }
 
-void assert_interrupt(const int intr_num) {
-    logger->debug("Interrupt {} asserted", intr_num);
-
-    const int reg_idx = intr_num >> 5;
-    const int intr_bit = 1 << (intr_num & 31);
-
-    assert((u64)reg_idx < NUM_REGS);
-
-    u32* flags = &HW_INTC_FLAGS[reg_idx];
-    u32* raw_flags = &HW_INTC_RAWFLAGS[reg_idx];
-    u32* mask = &HW_INTC_MASK[reg_idx];
-
-    *raw_flags |= intr_bit;
-
-    if ((*mask & intr_bit) != 0) {
-        *flags |= intr_bit;
-
-        kanacore::get_sc_ptr()->assert_interrupt();
-    }
+void assert_sc_interrupt(const int intr_num) {
+    intcs[0].assert_interrupt(intr_num);
 }
 
-void clear_interrupt(const int intr_num) {
-    logger->debug("Interrupt {} cleared", intr_num);
+void assert_me_interrupt(const int intr_num) {
+    intcs[1].assert_interrupt(intr_num);
+}
 
-    const int reg_idx = intr_num >> 5;
-    const int intr_bit = 1 << (intr_num & 31);
+void clear_sc_interrupt(const int intr_num) {
+    intcs[0].clear_interrupt(intr_num);
+}
 
-    assert((u64)reg_idx < NUM_REGS);
-
-    u32* flags = &HW_INTC_FLAGS[reg_idx];
-    u32* raw_flags = &HW_INTC_RAWFLAGS[reg_idx];
-
-    *flags &= ~intr_bit;
-    *raw_flags &= ~intr_bit;
-    
-    check_pending_interrupts();
+void clear_me_interrupt(const int intr_num) {
+    intcs[1].clear_interrupt(intr_num);
 }
 
 };
