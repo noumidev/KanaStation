@@ -3,7 +3,7 @@
  * Copyright (C) 2026  noumidev
  */
 
-/* core/hw/me/dmac.hpp - Virtual Mobile Engine DMA controller */
+/* core/hw/me/vme_dmac.hpp - Virtual Mobile Engine DMA controller */
 
 #pragma once
 

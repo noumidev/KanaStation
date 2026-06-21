@@ -92,7 +92,7 @@ static void start_command() {
             exit(1);
     }
 
-    // After sending a "command", MeBooter will only read this register
+    // After sending a "command", MeBooter will only read the STATUS register
     // before sending further commands. This does not seem to clear interrupts however,
     // so we will do it here
     intc::clear_me_interrupt(VMEDMAC_INTERRUPT);
@@ -103,6 +103,9 @@ static u32 read(const u32 addr) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
+
+            // The ME firmware will poll bits 9 and/or 11 after commands.
+            // TODO: figure out what these bits mean
             return HW_VMEDMAC_STATUS;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
