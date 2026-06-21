@@ -10,9 +10,10 @@
 #include <cassert>
 #include <cstdlib>
 #include <cmath>
-#include <type_traits>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
+
+#include <core/hw/bus.hpp>
 
 namespace kanacore::hw::allegrex {
     
@@ -22,7 +23,7 @@ constexpr bool SILENT_JUMPS = true;
 
 constexpr u32 BOOT_EXCEPTION_ADDR = 0xBFC00000;
 
-Allegrex::Allegrex(const CpuId cpu_id) : cpu_id(cpu_id) {
+Allegrex::Allegrex(const CpuId cpu_id) : cpu_id(cpu_id), bus(cpu_id == CPU_ID_SC ? "Bus" : "ME Bus") {
     logger = spdlog::stdout_color_st(cpu_id == CPU_ID_SC ? "SC" : "ME");
 }
 
@@ -55,14 +56,8 @@ T Allegrex::read(const u32 addr) {
 
     // TODO: properly handle memory segments
     const u32 masked_addr = addr & 0x1FFFFFFF;
-
-    if (std::is_same_v<T, u8>) {
-        return read8(masked_addr);
-    } else if (std::is_same_v<T, u16>) {
-        return read16(masked_addr);
-    } else {
-        return read32(masked_addr);
-    }
+    
+    return bus.read<T>(masked_addr);
 }
 
 template u8  Allegrex::read(const u32);
@@ -79,13 +74,7 @@ void Allegrex::write(const u32 addr, const T data) {
     // TODO: properly handle memory segments
     const u32 masked_addr = addr & 0x1FFFFFFF;
 
-    if (std::is_same_v<T, u8>) {
-        write8(masked_addr, data);
-    } else if (std::is_same_v<T, u16>) {
-        write16(masked_addr, data);
-    } else {
-        write32(masked_addr, data);
-    }
+    bus.write<T>(masked_addr, data);
 }
 
 template void Allegrex::write(const u32, const u8);

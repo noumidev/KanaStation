@@ -7,7 +7,6 @@
 
 #include <core/kanacore.hpp>
 
-#include <array>
 #include <cstdlib>
 #include <memory>
 
@@ -33,37 +32,17 @@
 #include <core/hw/systime.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
+#include <core/hw/me/scratchpad.hpp>
 #include <core/hw/uart/uart.hpp>
 
 namespace kanacore {
 
 using namespace common;
 
-constexpr u64 NUM_BUSES = 2;
-
 static std::shared_ptr<spdlog::logger> logger;
 
 static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
 static hw::allegrex::Allegrex me(hw::allegrex::CpuId::CPU_ID_ME);
-
-static std::array<hw::bus::Bus, NUM_BUSES> buses = {
-    hw::bus::Bus("Bus"),
-    hw::bus::Bus("ME Bus"),
-};
-
-template<typename T, int bus_num>
-static T read(const u32 addr) {
-    static_assert(bus_num < NUM_BUSES);
-
-    return buses[bus_num].read<T>(addr);
-}
-
-template<typename T, int bus_num>
-static void write(const u32 addr, const T data) {
-    static_assert(bus_num < NUM_BUSES);
-
-    return buses[bus_num].write<T>(addr, data);
-}
 
 // Move this to display code later on
 static void vsync(const int) {
@@ -115,23 +94,8 @@ void initialize(const Configuration config) {
     hw::systime::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
+    hw::me::scratchpad::initialize();
     hw::uart::initialize();
-
-    // Set up system core memory handlers
-    sc.read8   = read<u8, 0>;
-    sc.read16  = read<u16, 0>;
-    sc.read32  = read<u32, 0>;
-    sc.write8  = write<u8, 0>;
-    sc.write16 = write<u16, 0>;
-    sc.write32 = write<u32, 0>;
-
-    // Set up MediaEngine memory handlers
-    me.read8   = read<u8, 1>;
-    me.read16  = read<u16, 1>;
-    me.read32  = read<u32, 1>;
-    me.write8  = write<u8, 1>;
-    me.write16 = write<u16, 1>;
-    me.write32 = write<u32, 1>;
 
     IS_INITIALIZED = true;
 }
@@ -155,6 +119,7 @@ void soft_reset() {
     hw::systime::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
+    hw::me::scratchpad::soft_reset();
     hw::uart::soft_reset();
 
     sc.soft_reset();
@@ -180,6 +145,7 @@ void hard_reset() {
     hw::systime::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
+    hw::me::scratchpad::hard_reset();
     hw::uart::hard_reset();
 
     sc.hard_reset();
@@ -215,6 +181,7 @@ void shutdown() {
     hw::systime::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
+    hw::me::scratchpad::shutdown();
     hw::uart::shutdown();
 }
 
@@ -227,11 +194,11 @@ hw::allegrex::Allegrex* get_me_ptr() {
 }
 
 hw::bus::Bus* get_sc_bus_ptr() {
-    return &buses[0];
+    return sc.get_bus_ptr();
 }
 
 hw::bus::Bus* get_me_bus_ptr() {
-    return &buses[1];
+    return me.get_bus_ptr();
 }
 
 void run() {

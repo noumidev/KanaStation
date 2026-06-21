@@ -12,6 +12,7 @@
 #include <spdlog/spdlog.h>
 
 #include <common/types.hpp>
+#include <core/hw/bus.hpp>
 
 namespace kanacore::hw::allegrex {
 
@@ -174,6 +175,8 @@ private:
     bool delay_slot_pending;
     bool in_delay_slot;
 
+    bus::Bus bus;
+
     enum class CpuState {
         Run,
         WaitForInterrupt
@@ -268,23 +271,17 @@ public:
     template<typename T>
     T read(const common::u32 addr);
 
-    // Read handlers need to be set up externally
-    common::u8  (*read8 )(const common::u32 addr);
-    common::u16 (*read16)(const common::u32 addr);
-    common::u32 (*read32)(const common::u32 addr);
-
     template<typename T>
     void write(const common::u32 addr, const T data);
-
-    // Write handlers need to be set up externally
-    void (*write8 )(const common::u32 addr, const common::u8  data);
-    void (*write16)(const common::u32 addr, const common::u16 data);
-    void (*write32)(const common::u32 addr, const common::u32 data);
 
     common::u32 fetch_instr();
 
     common::u32 get_instr_addr() const {
         return instr_addr;
+    }
+
+    bus::Bus* get_bus_ptr() {
+        return &bus;
     }
 };
 
