@@ -44,6 +44,7 @@ enum IoAddress {
     IO_ADDRESS_CLKSEL_HI  = SYSCTRL_ADDR + 0x060,
     IO_ADDRESS_SPICLKSEL  = SYSCTRL_ADDR + 0x064,
     IO_ADDRESS_PLLCTRL    = SYSCTRL_ADDR + 0x068,
+    IO_ADDRESS_AVCPOWER   = SYSCTRL_ADDR + 0x070,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
     IO_ADDRESS_FUSECONFIG = SYSCTRL_ADDR + 0x098,
@@ -61,6 +62,7 @@ enum IoAddress {
 #define HW_SYSCTRL_CLKSEL_HI  ctx.clock_select[1]
 #define HW_SYSCTRL_SPICLKSEL  ctx.spi_clock_select
 #define HW_SYSCTRL_PLLCTRL    ctx.pll_control
+#define HW_SYSCTRL_AVCPOWER   ctx.avc_power
 #define HW_SYSCTRL_IOEN       ctx.io_enable
 #define HW_SYSCTRL_GPIOEN     ctx.gpio_enable
 #define HW_SYSCTRL_PLLMULT    ctx.pll_multiplier
@@ -90,6 +92,7 @@ static struct {
     u32 clock_select[2];
     u32 spi_clock_select;
     u32 pll_control;
+    u32 avc_power;
     u32 io_enable;
     u32 gpio_enable;
     u32 pll_multiplier;
@@ -143,6 +146,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_PLLCTRL:
             logger->debug("PLLCTRL read32");
             return HW_SYSCTRL_PLLCTRL;
+        case IoAddress::IO_ADDRESS_AVCPOWER:
+            logger->debug("AVCPOWER read32");
+            return HW_SYSCTRL_AVCPOWER;
         case IoAddress::IO_ADDRESS_IOEN:
             logger->debug("IOEN read32");
             return HW_SYSCTRL_IOEN;
@@ -238,6 +244,11 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("SPICLKSEL write32 = {:08X}", data);
 
             HW_SYSCTRL_SPICLKSEL = data;
+            break;
+        case IoAddress::IO_ADDRESS_AVCPOWER:
+            logger->debug("AVCPOWER write32 = {:08X}", data);
+
+            HW_SYSCTRL_AVCPOWER = data;
             break;
         case IoAddress::IO_ADDRESS_IOEN:
             logger->debug("IOEN write32 = {:08X}", data);
