@@ -27,6 +27,7 @@
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
 #include <core/hw/spi.hpp>
+#include <core/hw/spock.hpp>
 #include <core/hw/syscon.hpp>
 #include <core/hw/sysctrl.hpp>
 #include <core/hw/systime.hpp>
@@ -90,6 +91,7 @@ void initialize(const Configuration config) {
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
     hw::spi::initialize();
+    hw::spock::initialize();
     hw::syscon::initialize();
     hw::sysctrl::initialize();
     hw::systime::initialize();
@@ -116,6 +118,7 @@ void soft_reset() {
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
     hw::spi::soft_reset();
+    hw::spock::soft_reset();
     hw::syscon::soft_reset();
     hw::sysctrl::soft_reset();
     hw::systime::soft_reset();
@@ -143,6 +146,7 @@ void hard_reset() {
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
     hw::spi::hard_reset();
+    hw::spock::hard_reset();
     hw::syscon::hard_reset();
     hw::sysctrl::hard_reset();
     hw::systime::hard_reset();
@@ -180,6 +184,7 @@ void shutdown() {
     hw::nand::shutdown();
     hw::shared_ram::shutdown();
     hw::spi::shutdown();
+    hw::spock::shutdown();
     hw::syscon::shutdown();
     hw::sysctrl::shutdown();
     hw::systime::shutdown();

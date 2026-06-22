@@ -22,6 +22,8 @@ constexpr common::i64 SPI_CLOCKRATE = 2 * ONE_MICROSECOND;
 
 enum EventType {
     KIRK_1ST_PHASE,
+    SPOCK,
+    LEPTON,
     SPI_TX,
     SYSCON_TX,
     I2C,
