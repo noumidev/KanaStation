@@ -67,7 +67,7 @@ static void reschedule_alarm() {
             scheduler::EventType::SYSTIME,
             alarm,
             0,
-            scheduler::from_microseconds(HW_SYSCTRL_ALARM - HW_SYSCTRL_COUNTER)
+            scheduler::from_microseconds(HW_SYSCTRL_ALARM - get_counter())
         );
     }
 }
