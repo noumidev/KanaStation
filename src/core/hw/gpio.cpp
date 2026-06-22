@@ -81,6 +81,8 @@ static const char* get_pin_name(const u32 pin) {
             return "SYSCON_NOTIFY";
         case Pin::PIN_SYSCON_ACKNOWLEDGE:
             return "SYSCON_ACKNOWLEDGE";
+        case Pin::PIN_LEPTON_ALIVE:
+            return "LEPTON_ALIVE";
         default:
             return "N/A";
     }
@@ -119,7 +121,7 @@ static u32 read_pins() {
         if ((gpio_enable & HW_GPIO_INEN & (1 << i)) != 0) {
             logger->debug("Reading pin {}", get_pin_name(i));
 
-            data |= ctx.inputs << i;
+            data |= ctx.inputs & (1 << i);
         }
     }
 
@@ -295,8 +297,11 @@ void set_pin(const u32 pin) {
 
     if ((HW_GPIO_INTRMASK & HW_GPIO_RISEINTR & (1 << pin)) != 0) {
         const bool is_edge_triggered = (HW_GPIO_EDGEINTR & (1 << pin)) != 0;
+
+        logger->debug("Is edge triggered: {}, old: {}", is_edge_triggered, old_pin);
     
         if ((is_edge_triggered && !old_pin) || !is_edge_triggered) {
+            logger->debug("Yay");
             HW_GPIO_INTRSTAT |= 1 << pin;
         }
     }
