@@ -152,7 +152,11 @@ enum Cp0Opcode {
 };
 
 enum FpuOpcode {
+    FPU_OPCODE_ADD    = 0x00,
+    FPU_OPCODE_SUB    = 0x01,
     FPU_OPCODE_MUL    = 0x02,
+    FPU_OPCODE_DIV    = 0x03,
+    FPU_OPCODE_SQRT   = 0x04,
     FPU_OPCODE_TRUNCW = 0x0D,
     FPU_OPCODE_CVTS   = 0x20,
 };
@@ -352,8 +356,28 @@ static i64 i_ext(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_fadd(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, cpu->get_fgr(FS) + cpu->get_fgr(FT));
+    return 1;
+}
+
+static i64 i_fdiv(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, cpu->get_fgr(FS) / cpu->get_fgr(FT));
+    return 1;
+}
+
 static i64 i_fmul(Allegrex* cpu, const u32 instr) {
     cpu->set_fgr(FD, cpu->get_fgr(FS) * cpu->get_fgr(FT));
+    return 1;
+}
+
+static i64 i_fsub(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, cpu->get_fgr(FS) - cpu->get_fgr(FT));
+    return 1;
+}
+
+static i64 i_fsqrt(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, std::sqrtf(cpu->get_fgr(FS)));
     return 1;
 }
 
@@ -741,8 +765,16 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                 }
             } else {
                 switch (FUNCT) {
+                    case FpuOpcode::FPU_OPCODE_ADD:
+                        return i_fadd(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_SUB:
+                        return i_fsub(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_MUL:
                         return i_fmul(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_DIV:
+                        return i_fdiv(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_SQRT:
+                        return i_fsqrt(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_TRUNCW:
                         return i_truncw(cpu, instr);
                     default:
