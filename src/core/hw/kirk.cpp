@@ -17,6 +17,8 @@
 #include <cryptopp/aes.h>
 #include <cryptopp/cmac.h>
 #include <cryptopp/cryptlib.h>
+#include <cryptopp/eccrypto.h>
+#include <cryptopp/integer.h>
 #include <cryptopp/modes.h>
 #include <cryptopp/sha.h>
 
@@ -32,6 +34,7 @@
 namespace kanacore::hw::kirk {
 
 using namespace common;
+using namespace CryptoPP;
 
 constexpr u64 KIRK_ADDR = 0x1DE00000;
 constexpr u64 KIRK_SIZE = 0x1000;
@@ -40,6 +43,8 @@ constexpr int KIRK_INTERRUPT = 24;
 
 constexpr u64 AES_KEY_SIZE = 16;
 constexpr u64 AES_KEYSTORE_SIZE = 128;
+
+constexpr u64 DIGEST_SIZE = 0x14;
 
 constexpr u8 AES_KEYSTORE[AES_KEYSTORE_SIZE][AES_KEY_SIZE] = {
     {0x2C, 0x92, 0xE5, 0x90, 0x2B, 0x86, 0xC1, 0x06, 0xB7, 0x2E, 0xEA, 0x6C, 0xD4, 0xEC, 0x72, 0x48},
@@ -283,14 +288,14 @@ static void aes_decrypt(const u8* key, u8* data, const u32 size) {
         0, 0, 0, 0, 0, 0, 0, 0,
     };
 
-    CryptoPP::CBC_Mode<CryptoPP::AES>::Decryption(key, AES_KEY_SIZE, AES_ZERO_IV).ProcessData(data, data, size);
+    CBC_Mode<AES>::Decryption(key, AES_KEY_SIZE, AES_ZERO_IV).ProcessData(data, data, size);
 }
 
 static bool cmac_verify(const u8* key, u8* data, const u32 size, const u8* expected_hash) {
     // Compute the CMAC hash
     u8 hash[AES_KEY_SIZE];
 
-    auto cmac = CryptoPP::CMAC<CryptoPP::AES>(key, AES_KEY_SIZE);
+    auto cmac = CMAC<AES>(key, AES_KEY_SIZE);
 
     cmac.Update(data, size);
     cmac.Final(hash);
@@ -301,8 +306,52 @@ static bool cmac_verify(const u8* key, u8* data, const u32 size, const u8* expec
     return std::memcmp(hash, expected_hash, AES_KEY_SIZE) == 0;
 }
 
+ECDSA<ECP, SHA1>::Verifier get_kirk1_verifier() {
+    // Curve parameters
+    ECP curve(
+        Integer("0xFFFFFFFFFFFFFFFF00000001FFFFFFFFFFFFFFFF"),
+        Integer(-3),
+        Integer("0x65D1488C0359E234ADC95BD3908014BD91A525F9")
+    );
+
+    ECP::Point G(
+        Integer("0x2259ACEE15489CB096A882F0AE1CF9FD8EE5F8FA"),
+        Integer("0x604358456D0A1CB2908DE90F27D75C82BEC108C0")
+    );
+
+    DL_GroupParameters_EC<ECP> params(
+        curve,
+        G,
+        Integer("0xFFFFFFFFFFFFFFFF0001B5C617F290EAE1DBAD8F")
+    );
+
+    // Public key
+    ECDSA<ECP, SHA1>::PublicKey public_key;
+
+    public_key.Initialize(
+        params,
+        ECP::Point(
+            Integer("0xED9CE58234E61A53C685D64D51D0236BC3B5D4B9"),
+            Integer("0x049DF1A075C0E04FB344858B61B79B69A63D2C39")
+        )
+    );
+
+    return ECDSA<ECP, SHA1>::Verifier(public_key);
+}
+
+static ECDSA<ECP, SHA1>::Verifier kirk1_verifier = get_kirk1_verifier();
+
+bool ecdsa_verify(const ECDSA<ECP, SHA1>::Verifier& verifier, const u8* r, const u8* s, const u8* data, size_t data_size) {
+    std::array<u8, 2 * DIGEST_SIZE> signature;
+
+    std::memcpy(signature.data(), r, DIGEST_SIZE);
+    std::memcpy(signature.data() + DIGEST_SIZE, s, DIGEST_SIZE);
+
+    return verifier.VerifyMessage(data, data_size, signature.data(), signature.size());
+}
+
 static void sha_hash(const u8* in, u8* out, const u32 size) {
-    auto sha_hasher = CryptoPP::SHA1();
+    auto sha_hasher = SHA1();
 
     sha_hasher.Update(in, size);
     sha_hasher.Final(out);
@@ -327,26 +376,34 @@ static i32 command_decrypt_private() {
 
     // TODO: use named constants
 
-    assert(metadata[0x19] == AUTH_MODE_CMAC);
+    assert((metadata[0x19] == AuthMode::AUTH_MODE_CMAC) || (metadata[0x19] == AuthMode::AUTH_MODE_ECDSA));
 
     u8* decrypt_key = (u8*)&metadata[0];
     u8* cmac_key = (u8*)&metadata[4];
 
-    // Decrypt the decryption and CMAC keys
-    aes_decrypt(AES_MASTER_KEY, decrypt_key, 2 * AES_KEY_SIZE);
+    if (metadata[0x19] == AuthMode::AUTH_MODE_CMAC) {
+        // Decrypt the decryption and CMAC keys
+        aes_decrypt(AES_MASTER_KEY, decrypt_key, 2 * AES_KEY_SIZE);
 
-    print_key("Decryption key", decrypt_key);
-    print_key("Signature  key", cmac_key);
+        print_key("Decryption key", decrypt_key);
+        print_key("Signature  key", cmac_key);
 
-    // Now we verify the signature of the header
-    logger->debug("Verifying header CMAC");
+        // Now we verify the signature of the header
+        logger->debug("Verifying header CMAC");
 
-    if (!cmac_verify(cmac_key, (u8*)&metadata[0x18], METADATA_SIZE - 0x60, (u8*)&metadata[8])) {
-        logger->error("Header CMAC check failed");
-        exit(1);
+        if (!cmac_verify(cmac_key, (u8*)&metadata[0x18], METADATA_SIZE - 0x60, (u8*)&metadata[8])) {
+            logger->error("Header CMAC check failed");
+            exit(1);
+        }
+    } else {
+        const u8* header_r = (u8*)&metadata[0x04];
+        const u8* header_s = (u8*)&metadata[0x09];
+    
+        if (!ecdsa_verify(kirk1_verifier, header_r, header_s, (u8*)&metadata[0x18], METADATA_SIZE - 0x60)) {
+            logger->error("Header ECDSA check failed");
+            exit(1);
+        }
     }
-
-    // To check the data CMAC, we first get the entire input buffer
 
     // The data size is always aligned up when not on a 16-byte boundary
     const u32 data_size = align_up(metadata[0x1C]);
@@ -359,11 +416,21 @@ static i32 command_decrypt_private() {
 
     dma_read(HW_KIRK_SRCADDR, buf.data(), total_size);
 
-    logger->debug("Verifying data CMAC");
+    if (metadata[0x19] == AuthMode::AUTH_MODE_CMAC) {
+        logger->debug("Verifying data CMAC");
 
-    if (!cmac_verify(cmac_key, &buf[0x60], total_size - 0x60, (u8*)&metadata[12])) {
-        logger->error("Data CMAC check failed");
-        exit(1);
+        if (!cmac_verify(cmac_key, &buf[0x60], total_size - 0x60, (u8*)&metadata[12])) {
+            logger->error("Data CMAC check failed");
+            exit(1);
+        }
+    } else {
+        const u8* data_r = (u8*)&metadata[0x0E];
+        const u8* data_s = (u8*)&metadata[0x13];
+    
+        if (!ecdsa_verify(kirk1_verifier, data_r, data_s, &buf[0x60], total_size - 0x60)) {
+            logger->error("Data ECDSA check failed");
+            exit(1);
+        }
     }
 
     // NOW we can decrypt the data
@@ -372,7 +439,7 @@ static i32 command_decrypt_private() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KIRK_ERROR_OK;
+    return KirkError::KIRK_ERROR_OK;
 }
 
 static i32 command_decrypt_static() {
@@ -400,12 +467,10 @@ static i32 command_decrypt_static() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KIRK_ERROR_OK;
+    return KirkError::KIRK_ERROR_OK;
 }
 
 static i32 command_hash() {
-    constexpr u64 DIGEST_SIZE = 0x14;
-
     u32 data_size;
 
     dma_read(HW_KIRK_SRCADDR, (u8*)&data_size, sizeof(data_size));
@@ -421,7 +486,7 @@ static i32 command_hash() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KIRK_ERROR_OK;
+    return KirkError::KIRK_ERROR_OK;
 }
 
 static void increment_counter(u8* buf) {
@@ -447,7 +512,7 @@ static i32 command_seed() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KIRK_ERROR_OK;
+    return KirkError::KIRK_ERROR_OK;
 }
 
 static void end_first_phase(const int result) {
