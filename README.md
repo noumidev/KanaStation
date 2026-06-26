@@ -8,7 +8,7 @@
 This is a **work-in-progress** and very early!
 
 ## Usage
-`KanaStation [path to boot ROM] [path to NAND dump]`
+`KanaStation [path to boot ROM] [path to NAND dump] (optional: [path to MS image])`
 
 ## Build instructions
 ```
