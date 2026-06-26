@@ -47,6 +47,7 @@ enum IoAddress {
     IO_ADDRESS_AVCPOWER   = SYSCTRL_ADDR + 0x070,
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
+    IO_ADDRESS_CONNSTAT   = SYSCTRL_ADDR + 0x080,
     IO_ADDRESS_FUSECONFIG = SYSCTRL_ADDR + 0x098,
     IO_ADDRESS_PLLMULT    = SYSCTRL_ADDR + 0x0FC,
 };
@@ -163,6 +164,7 @@ static u32 read(const u32 addr) {
             logger->debug("PLLMULT read32");
             return HW_SYSCTRL_PLLMULT;
         case SYSCTRL_ADDR + 0x03C:
+        case SYSCTRL_ADDR + 0x074:
             logger->warn("Unmapped read32 @ {:08X}", addr);
             return 0;
         default:
@@ -179,14 +181,20 @@ static void write_reset_enable(const u32 data) {
     };
 
     // This puts peripherals into reset state when the corresponding bit is 1.
-    // I'm unsure if this is edge or level triggered, but I will assume the former for now
-    // (only way to make SC reset work here)
+    // Devices are reset when the bit is cleared to 0 again
 
     for (u32 i = 0; i < ResetDevice::RESET_DEVICE_NUM; i++) {
         if (((HW_SYSCTRL_RESETEN & (1 << i)) == 0) && ((data & (1 << i)) != 0)) {
             logger->debug("Reset asserted for {}", RESET_DEVICE_NAMES[i]);
 
-            if (reset_funcs[i] != nullptr) {
+            if ((reset_funcs[i] != nullptr) && (i == ResetDevice::RESET_DEVICE_SC)) {
+                // This needs to reset here
+                reset_funcs[i]();
+            }
+        } else if (((HW_SYSCTRL_RESETEN & (1 << i)) != 0) && ((data & (1 << i)) == 0)) {
+            logger->debug("Reset cleared for {}", RESET_DEVICE_NAMES[i]);
+
+            if ((reset_funcs[i] != nullptr) && (i != ResetDevice::RESET_DEVICE_SC)) {
                 reset_funcs[i]();
             }
         }
@@ -261,6 +269,7 @@ static void write(const u32 addr, const u32 data) {
             HW_SYSCTRL_GPIOEN = data;
             break;
         case SYSCTRL_ADDR + 0x03C:
+        case SYSCTRL_ADDR + 0x074:
             logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
         default:
