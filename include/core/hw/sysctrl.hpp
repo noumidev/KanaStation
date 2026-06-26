@@ -18,4 +18,9 @@ void shutdown();
 
 common::u32 get_gpio_enable();
 
+common::u64 get_fuseid();
+
+void set_ms0_connected();
+void clear_ms0_connected();
+
 };

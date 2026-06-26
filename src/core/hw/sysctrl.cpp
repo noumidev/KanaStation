@@ -32,6 +32,8 @@ constexpr u64 SYSCTRL_SIZE = 0x1000;
 constexpr u32 TACHYON_VERSION = 0x40000000;
 constexpr u32 RAM_SIZE = 1;
 
+constexpr u64 FUSEID = 0x0000590BB2A18793;
+
 enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
@@ -48,6 +50,8 @@ enum IoAddress {
     IO_ADDRESS_IOEN       = SYSCTRL_ADDR + 0x078,
     IO_ADDRESS_GPIOEN     = SYSCTRL_ADDR + 0x07C,
     IO_ADDRESS_CONNSTAT   = SYSCTRL_ADDR + 0x080,
+    IO_ADDRESS_FUSEID_LO  = SYSCTRL_ADDR + 0x090,
+    IO_ADDRESS_FUSEID_HI  = SYSCTRL_ADDR + 0x094,
     IO_ADDRESS_FUSECONFIG = SYSCTRL_ADDR + 0x098,
     IO_ADDRESS_PLLMULT    = SYSCTRL_ADDR + 0x0FC,
 };
@@ -66,6 +70,7 @@ enum IoAddress {
 #define HW_SYSCTRL_AVCPOWER   ctx.avc_power
 #define HW_SYSCTRL_IOEN       ctx.io_enable
 #define HW_SYSCTRL_GPIOEN     ctx.gpio_enable
+#define HW_SYSCTRL_CONNSTAT   ctx.connection_status
 #define HW_SYSCTRL_PLLMULT    ctx.pll_multiplier
 
 enum ResetDevice {
@@ -96,6 +101,7 @@ static struct {
     u32 avc_power;
     u32 io_enable;
     u32 gpio_enable;
+    u32 connection_status;
     u32 pll_multiplier;
 } ctx;
 
@@ -157,6 +163,15 @@ static u32 read(const u32 addr) {
             // Potentially move this to future GPIO emulation
             logger->debug("GPIOEN read32");
             return HW_SYSCTRL_GPIOEN;
+        case IoAddress::IO_ADDRESS_CONNSTAT:
+            logger->debug("CONNSTAT read32");
+            return HW_SYSCTRL_CONNSTAT;
+        case IoAddress::IO_ADDRESS_FUSEID_LO:
+            logger->debug("FUSEID_LO read32");
+            return (u32)FUSEID;
+        case IoAddress::IO_ADDRESS_FUSEID_HI:
+            logger->debug("FUSEID_HI read32");
+            return FUSEID >> 32;
         case IoAddress::IO_ADDRESS_FUSECONFIG:
             logger->debug("FUSECONFIG read32");
             return FUSECONFIG;
@@ -253,6 +268,11 @@ static void write(const u32 addr, const u32 data) {
 
             HW_SYSCTRL_SPICLKSEL = data;
             break;
+        case IoAddress::IO_ADDRESS_PLLCTRL:
+            logger->debug("PLLCTRL write32 = {:08X}", data);
+
+            HW_SYSCTRL_PLLCTRL = data;
+            break;
         case IoAddress::IO_ADDRESS_AVCPOWER:
             logger->debug("AVCPOWER write32 = {:08X}", data);
 
@@ -267,6 +287,9 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_GPIOEN:
             logger->debug("GPIOEN write32 = {:08X}", data);
             HW_SYSCTRL_GPIOEN = data;
+            break;
+        case IoAddress::IO_ADDRESS_CONNSTAT:
+            logger->debug("CONNSTAT write32 = {:08X}", data);
             break;
         case SYSCTRL_ADDR + 0x03C:
         case SYSCTRL_ADDR + 0x074:
@@ -314,6 +337,18 @@ void shutdown() {
 
 u32 get_gpio_enable() {
     return HW_SYSCTRL_GPIOEN;
+}
+
+u64 get_fuseid() {
+    return FUSEID;
+}
+
+void set_ms0_connected() {
+    HW_SYSCTRL_CONNSTAT |= 0x100;
+}
+
+void clear_ms0_connected() {
+    HW_SYSCTRL_CONNSTAT &= ~0x100;
 }
 
 };
