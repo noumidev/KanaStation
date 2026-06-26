@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -34,6 +35,7 @@ constexpr u64 NUM_UARTS = 2;
 constexpr u64 IO_ADDR = 0x1E000000;
 
 enum IoAddress {
+    IO_ADDRESS_DATA     = IO_ADDR + 0x000,
     IO_ADDRESS_RXERROR  = IO_ADDR + 0x004,
     IO_ADDRESS_STATUS   = IO_ADDR + 0x018,
     IO_ADDRESS_INTBAUD  = IO_ADDR + 0x024,
@@ -60,6 +62,8 @@ enum IoAddress {
 
 struct Uart {
     std::shared_ptr<spdlog::logger> logger;
+
+    FILE* logfile;
 
     u8 receive_error;
 
@@ -201,6 +205,12 @@ static void write(const u32 addr, const u32 data) {
     Uart* uart = &uarts[uart_num];
 
     switch (addr & ~0xFF0000) {
+        case IoAddress::IO_ADDRESS_DATA:
+            uart->logger->debug("DATA write32 = {:08X}", data);
+            
+            std::fputc((char)data, uart->logfile);
+            std::fflush(uart->logfile);
+            break;
         case IoAddress::IO_ADDRESS_RXERROR:
             uart->logger->debug("RXERROR write32 = {:08X}", data);
 
@@ -266,6 +276,9 @@ void initialize() {
     uarts[0].logger = spdlog::stdout_color_st("UART4");
     uarts[1].logger = spdlog::stdout_color_st("HP/Remote");
 
+    uarts[0].logfile = std::fopen("uart4.txt", "w+");
+    uarts[1].logfile = std::fopen("hpremote.txt", "w+");
+
     std::memset(&ctx, 0, sizeof(ctx));
 }
 
@@ -283,7 +296,8 @@ void hard_reset() {
 }
 
 void shutdown() {
-
+    std::fclose(uarts[0].logfile);
+    std::fclose(uarts[1].logfile);
 }
 
 };
