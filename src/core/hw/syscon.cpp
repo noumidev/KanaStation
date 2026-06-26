@@ -37,20 +37,26 @@ constexpr static u8 INITIAL_SCRATCHPAD[SCRATCHPAD_SIZE] = {
 };
 
 enum SysconCommand {
-    SYSCON_COMMAND_GET_BARYON_VERSION     = 0x01,
-    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY = 0x07,
-    SYSCON_COMMAND_READ_CLOCK             = 0x09,
-    SYSCON_COMMAND_READ_ALARM             = 0x0A,
-    SYSCON_COMMAND_GET_WAKE_UP_FACTOR     = 0x0E,
-    SYSCON_COMMAND_GET_BARYON_TIMESTAMP   = 0x11,
-    SYSCON_COMMAND_READ_SCRATCHPAD        = 0x24,
-    SYSCON_COMMAND_SEND_SETPARAM          = 0x25,
-    SYSCON_COMMAND_CTRL_TACHYON_WDT       = 0x31,
-    SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING = 0x33,
-    SYSCON_COMMAND_CTRL_HR_POWER          = 0x34,
-    SYSCON_COMMAND_CTRL_VOLTAGE           = 0x42,
-    SYSCON_COMMAND_GET_POWER_STATUS       = 0x46,
-    SYSCON_COMMAND_CTRL_LED               = 0x47,
+    SYSCON_COMMAND_GET_BARYON_VERSION      = 0x01,
+    SYSCON_COMMAND_GET_TACHYON_TEMP        = 0x05,
+    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY  = 0x07,
+    SYSCON_COMMAND_READ_CLOCK              = 0x09,
+    SYSCON_COMMAND_READ_ALARM              = 0x0A,
+    SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS = 0x0B,
+    SYSCON_COMMAND_GET_WAKE_UP_FACTOR      = 0x0E,
+    SYSCON_COMMAND_GET_BARYON_TIMESTAMP    = 0x11,
+    SYSCON_COMMAND_READ_SCRATCHPAD         = 0x24,
+    SYSCON_COMMAND_SEND_SETPARAM           = 0x25,
+    SYSCON_COMMAND_CTRL_TACHYON_WDT        = 0x31,
+    SYSCON_COMMAND_RESET_DEVICE            = 0x32,
+    SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING  = 0x33,
+    SYSCON_COMMAND_CTRL_HR_POWER           = 0x34,
+    SYSCON_COMMAND_GET_POMMEL_VERSION      = 0x40,
+    SYSCON_COMMAND_CTRL_VOLTAGE            = 0x42,
+    SYSCON_COMMAND_GET_POWER_STATUS        = 0x46,
+    SYSCON_COMMAND_CTRL_LED                = 0x47,
+    SYSCON_COMMAND_CTRL_LEPTON_POWER       = 0x4B,
+    SYSCON_COMMAND_CTRL_MS_POWER           = 0x4C,
 };
 
 enum BufferIndex {
@@ -150,6 +156,12 @@ static void common_read(const u8 command) {
     u32 data;
 
     switch (command) {
+        case SysconCommand::SYSCON_COMMAND_GET_TACHYON_TEMP:
+            logger->debug("GET_TACHYON_TEMP");
+            
+            // Seems to be the/an expected value
+            data = 13094;
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
             logger->debug("GET_KERNEL_DIGITAL_KEY");
             
@@ -168,12 +180,23 @@ static void common_read(const u8 command) {
             // See above
             data = 0;
             break;
+        case SysconCommand::SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS:
+            logger->debug("GET_POWER_SUPPLY_STATUS");
+
+            // What is this? Bit 1 seems to indicate that a battery is present
+            data = 0xC0;
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
             logger->debug("GET_WAKE_UP_FACTOR");
             
             // I don't know what this is. After boot, this value is 0x4C0, but IPL crashes
             // if bit 7 is set.
             data = 0x440;
+            break;
+        case SysconCommand::SYSCON_COMMAND_GET_POMMEL_VERSION:
+            logger->debug("GET_POMMEL_VERSION");
+            
+            data = 0x112;
             break;
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             logger->debug("GET_POWER_STATUS");
@@ -221,6 +244,9 @@ static void common_write(const u8 command) {
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
             logger->debug("CTRL_TACHYON_WDT: {}", data);
             break;
+        case SysconCommand::SYSCON_COMMAND_RESET_DEVICE:
+            logger->debug("RESET_DEVICE: {}", data);
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
             logger->debug("CTRL_ANALOG_XY_POLLING: {}", data);
             break;
@@ -229,6 +255,12 @@ static void common_write(const u8 command) {
             break;
         case SysconCommand::SYSCON_COMMAND_CTRL_LED:
             logger->debug("CTRL_LED: {}", data);
+            break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_LEPTON_POWER:
+            logger->debug("CTRL_LEPTON_POWER: {}", data);
+            break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_MS_POWER:
+            logger->debug("CTRL_MS_POWER: {}", data);
             break;
         default:
             logger->error("Unhandled common write for command {:02X}", command);
@@ -319,15 +351,21 @@ static void start_command() {
             command_ctrl_hr_power();
             break;
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
+        case SysconCommand::SYSCON_COMMAND_RESET_DEVICE:
         case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
         case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
         case SysconCommand::SYSCON_COMMAND_CTRL_LED:
+        case SysconCommand::SYSCON_COMMAND_CTRL_LEPTON_POWER:
+        case SysconCommand::SYSCON_COMMAND_CTRL_MS_POWER:
             common_write(command);
             break;
+        case SysconCommand::SYSCON_COMMAND_GET_TACHYON_TEMP:
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
         case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
         case SysconCommand::SYSCON_COMMAND_READ_ALARM:
+        case SysconCommand::SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS:
         case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
+        case SysconCommand::SYSCON_COMMAND_GET_POMMEL_VERSION:
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             common_read(command);
             break;
@@ -365,7 +403,11 @@ void soft_reset() {
 }
 
 void hard_reset() {
-     
+    constexpr bool BOOT_SERVICE_MODE = false;
+
+    if (BOOT_SERVICE_MODE) {
+        gpio::set_pin(gpio::Pin::PIN_SYSCON_ACKNOWLEDGE);
+    }
 }
 
 void shutdown() {
