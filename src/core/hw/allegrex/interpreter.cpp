@@ -102,9 +102,11 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_CLZ     = 0x16,
     SPECIAL_OPCODE_MULT    = 0x18,
     SPECIAL_OPCODE_MULTU   = 0x19,
+    SPECIAL_OPCODE_DIV     = 0x1A,
     SPECIAL_OPCODE_DIVU    = 0x1B,
     SPECIAL_OPCODE_ADD     = 0x20,
     SPECIAL_OPCODE_ADDU    = 0x21,
+    SPECIAL_OPCODE_SUB     = 0x22,
     SPECIAL_OPCODE_SUBU    = 0x23,
     SPECIAL_OPCODE_AND     = 0x24,
     SPECIAL_OPCODE_OR      = 0x25,
@@ -162,6 +164,8 @@ enum FpuOpcode {
 };
 
 enum BitShuffleOpcode {
+    BIT_SHUFFLE_OPCODE_WSBH   = 0x02,
+    BIT_SHUFFLE_OPCODE_WSBW   = 0x03,
     BIT_SHUFFLE_OPCODE_SEB    = 0x10,
     BIT_SHUFFLE_OPCODE_BITREV = 0x14,
     BIT_SHUFFLE_OPCODE_SEH    = 0x18,
@@ -326,6 +330,18 @@ static i64 i_ctc(Allegrex* cpu, const u32 instr) {
 static i64 i_cvts(Allegrex* cpu, const u32 instr) {
     cpu->set_fgr(FD, (f32)cpu->get_fgr_raw(FS));
     return 1;
+}
+
+static i64 i_div(Allegrex* cpu, const u32 instr) {
+    const i32 num = cpu->get_reg(RS);
+    const i32 denom = cpu->get_reg(RT);
+
+    assert((denom != 0) && !((num == INT32_MIN) && (denom == -1)));
+
+    cpu->set_reg(32, num / denom);
+    cpu->set_reg(33, num % denom);
+
+    return 1; // Not correct
 }
 
 static i64 i_divu(Allegrex* cpu, const u32 instr) {
@@ -582,6 +598,11 @@ static i64 i_ori(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_rotr(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RD, std::rotr(cpu->get_reg(RT), SA));
+    return 1;
+}
+
 static i64 i_rotrv(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, std::rotr(cpu->get_reg(RT), (cpu->get_reg(RS) & 0x1F)));
     return 1;
@@ -657,6 +678,9 @@ static i64 i_srlv(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+// Is identical to SUBU as far as I remember, so...
+// static i64 i_sub(Allegrex* cpu, const u32 instr) {
+
 static i64 i_subu(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RS) - cpu->get_reg(RT));
     return 1;
@@ -703,6 +727,20 @@ static i64 i_truncw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_wsbh(Allegrex* cpu, const u32 instr) {
+    const u32 t = cpu->get_reg(RT);
+
+    cpu->set_reg(RD, ((t & 0xFF) << 8) | ((t & 0xFF00) >> 8) | ((t & 0xFF0000) << 8) | ((t & 0xFF000000) >> 8));
+    return 1;
+}
+
+static i64 i_wsbw(Allegrex* cpu, const u32 instr) {
+    const u32 t = cpu->get_reg(RT);
+
+    cpu->set_reg(RD, (t >> 24) | (t << 24) | ((t & 0xFF0000) >> 8) | ((t & 0xFF00) << 8));
+    return 1;
+}
+
 static i64 i_xor(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, cpu->get_reg(RS) ^ cpu->get_reg(RT));
     return 1;
@@ -715,6 +753,10 @@ static i64 i_xori(Allegrex* cpu, const u32 instr) {
 
 static i64 i_bit_shuffle(Allegrex* cpu, const u32 instr) {
     switch (SA) {
+        case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_WSBH:
+            return i_wsbh(cpu, instr);
+        case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_WSBW:
+            return i_wsbw(cpu, instr);
         case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_SEB:
             return i_seb(cpu, instr);
         case BitShuffleOpcode::BIT_SHUFFLE_OPCODE_BITREV:
@@ -826,9 +868,7 @@ static i64 i_shift_right(Allegrex* cpu, const u32 instr) {
     if ((RS & 1) == 0) {
         return i_srl(cpu, instr);
     } else {
-        cpu->get_logger()->error("Unimplemented ROTR");
-        cpu->dump_state();
-        exit(1);
+        return i_rotr(cpu, instr);
     }
 }
 
@@ -951,9 +991,11 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_CLZ    ] = i_clz;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MULT   ] = i_mult;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU  ] = i_multu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_DIV    ] = i_div;
     special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU   ] = i_divu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADD    ] = i_addu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU   ] = i_addu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_SUB    ] = i_subu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SUBU   ] = i_subu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_AND    ] = i_and;
     special_table[SpecialOpcode::SPECIAL_OPCODE_OR     ] = i_or;
