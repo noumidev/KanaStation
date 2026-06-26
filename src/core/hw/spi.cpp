@@ -188,6 +188,12 @@ static u32 read_receive_fifo() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_CONTROL0:
+            logger->debug("CONTROL0 read32");
+            return HW_SPI_CONTROL0;
+        case IoAddress::IO_ADDRESS_CONTROL1:
+            logger->debug("CONTROL1 read32");
+            return HW_SPI_CONTROL1;
         case IoAddress::IO_ADDRESS_DATA:
             logger->debug("DATA read32");
             return read_receive_fifo();
