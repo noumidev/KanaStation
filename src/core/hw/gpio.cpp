@@ -152,6 +152,15 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_READ:
             logger->debug("READ read32");
             return read_pins();
+        case IoAddress::IO_ADDRESS_EDGEINTR:
+            logger->debug("EDGEINTR read32");
+            return HW_GPIO_EDGEINTR;
+        case IoAddress::IO_ADDRESS_FALLINTR:
+            logger->debug("FALLINTR read32");
+            return HW_GPIO_FALLINTR;
+        case IoAddress::IO_ADDRESS_RISEINTR:
+            logger->debug("RISEINTR read32");
+            return HW_GPIO_RISEINTR;
         case IoAddress::IO_ADDRESS_INTRMASK:
             logger->debug("INTRMASK read32");
             return HW_GPIO_INTRMASK;
@@ -275,7 +284,7 @@ void clear_pin(const u32 pin) {
 
     ctx.inputs &= ~(1 << pin);
 
-    if ((HW_GPIO_INTRMASK & HW_GPIO_FALLINTR & (1 << pin)) != 0) {
+    if ((HW_GPIO_FALLINTR & (1 << pin)) != 0) {
         const bool is_edge_triggered = (HW_GPIO_EDGEINTR & (1 << pin)) != 0;
     
         if ((is_edge_triggered && old_pin) || !is_edge_triggered) {
@@ -295,7 +304,7 @@ void set_pin(const u32 pin) {
 
     ctx.inputs |= 1 << pin;
 
-    if ((HW_GPIO_INTRMASK & HW_GPIO_RISEINTR & (1 << pin)) != 0) {
+    if ((HW_GPIO_RISEINTR & (1 << pin)) != 0) {
         const bool is_edge_triggered = (HW_GPIO_EDGEINTR & (1 << pin)) != 0;
 
         logger->debug("Is edge triggered: {}, old: {}", is_edge_triggered, old_pin);
