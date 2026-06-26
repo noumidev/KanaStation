@@ -8,7 +8,9 @@
 #include <core/hw/bus.hpp>
 
 #include <array>
+#include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -127,6 +129,19 @@ void Bus::write(const u32 addr, const u32 data) {
     }
 
     write32_func(addr, data);
+}
+
+void Bus::dump(const char* dump_path, const u32 addr, const u32 size) {
+    FILE* file = std::fopen(dump_path, "w+b");
+
+    std::vector<u8> bytes(size);
+
+    for (u32 i = 0; i < size; i++) {
+        bytes[i] = read<u8>(addr + i);
+    }
+
+    std::fwrite(bytes.data(), sizeof(u8), size, file);
+    std::fclose(file);
 }
 
 void Bus::map(const u32 addr, const u32 size, const PageDescriptor page_desc) {

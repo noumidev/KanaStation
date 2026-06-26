@@ -58,6 +58,8 @@ public:
     template<typename T>
     void write(const common::u32 addr, const T data);
 
+    void dump(const char* dump_path, const common::u32 addr, const common::u32 size);
+
     // Maps read/write handlers 
     void map(const common::u32 addr, const common::u32 size, const PageDescriptor page_desc);
 
