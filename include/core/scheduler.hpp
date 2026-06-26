@@ -27,6 +27,7 @@ enum EventType {
     SPI_TX,
     SYSCON_TX,
     I2C,
+    MEMORY_STICK,
     NAND_DMA,
     VME_DMA,
     SYSTIME,

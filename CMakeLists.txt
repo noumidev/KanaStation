@@ -38,6 +38,7 @@ set(SOURCES
     src/core/hw/i2c.cpp
     src/core/hw/intc.cpp
     src/core/hw/kirk.cpp
+    src/core/hw/ms.cpp
     src/core/hw/nand.cpp
     src/core/hw/shared_ram.cpp
     src/core/hw/spi.cpp
@@ -69,6 +70,7 @@ set(HEADERS
     include/core/hw/i2c.hpp
     include/core/hw/intc.hpp
     include/core/hw/kirk.hpp
+    include/core/hw/ms.hpp
     include/core/hw/nand.hpp
     include/core/hw/shared_ram.hpp
     include/core/hw/spi.hpp

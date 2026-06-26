@@ -37,6 +37,7 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "SPI TX",
     "SYSCON TX",
     "I2C",
+    "Memory Stick",
     "NAND DMA",
     "VME DMA",
     "SysTime",
