@@ -30,6 +30,7 @@
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
+#include <core/hw/sysctrl.hpp>
 
 namespace kanacore::hw::kirk {
 
@@ -199,6 +200,7 @@ enum KirkCommand {
     KIRK_COMMAND_DECRYPT_STATIC  = 0x07,
     KIRK_COMMAND_HASH            = 0x0B,
     KIRK_COMMAND_SEED            = 0x0F,
+    KIRK_COMMAND_CERTVRY         = 0x12,
 };
 
 enum AuthMode {
@@ -206,8 +208,13 @@ enum AuthMode {
     AUTH_MODE_ECDSA,
 };
 
-enum KirkError {
-    KIRK_ERROR_OK,
+enum KirkResult {
+    KIRK_RESULT_SUCCESS             = 0x00,
+    KIRK_RESULT_INVALID_MODE        = 0x02,
+    KIRK_RESULT_INVALID_HEADER_SIG  = 0x03,
+    KIRK_RESULT_INVALID_DATA_SIG    = 0x04,
+    KIRK_RESULT_INVALID_DEC_KEYSEED = 0x0F,
+    KIRK_RESULT_INVALID_DATA_SIZE   = 0x10,
 };
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -272,6 +279,15 @@ static void dma_write(const u32 addr, const u8* data, const u32 size) {
     }
 }
 
+static void dma_clear(const u32 addr, const u32 size) {
+    bus::Bus* sc_bus = kanacore::get_sc_bus_ptr();
+
+    // See above
+    for (u32 i = 0; i < size; i++) {
+        sc_bus->write<u8>(addr + i, 0);
+    }
+}
+
 static void print_key(const char* name, const u8* key) {
     logger->debug(
         "{}: {:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
@@ -279,6 +295,16 @@ static void print_key(const char* name, const u8* key) {
         key[0x0], key[0x1], key[0x2], key[0x3], key[0x4], key[0x5], key[0x6], key[0x7],
         key[0x8], key[0x9], key[0xA], key[0xB], key[0xC], key[0xD], key[0xE], key[0xF]
     );
+}
+
+// Encrypts data in-place using AES-CBC
+static void aes_encrypt(const u8* key, u8* data, const u32 size) {
+    constexpr u8 AES_ZERO_IV[] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    };
+
+    CBC_Mode<AES>::Encryption(key, AES_KEY_SIZE, AES_ZERO_IV).ProcessData(data, data, size);
 }
 
 // Decrypts AES-CBC encrypted data in-place
@@ -364,118 +390,186 @@ static i32 command_decrypt_private() {
         0x7F, 0xE6, 0x0E, 0xA3, 0xFD, 0x03, 0xA8, 0xBA
     };
 
-    constexpr u64 METADATA_SIZE = 0x90;
-
     logger->debug("DECRYPT_PRIVATE");
-
-    // Step one is to get the metadata header, which includes
-    // keys, mode and more
-    u32 metadata[METADATA_SIZE / sizeof(u32)];
-
-    dma_read(HW_KIRK_SRCADDR, (u8*)metadata, METADATA_SIZE);
 
     // TODO: use named constants
 
-    assert((metadata[0x19] == AuthMode::AUTH_MODE_CMAC) || (metadata[0x19] == AuthMode::AUTH_MODE_ECDSA));
+    // This field needs to match the command number
+    u32 mode;
 
-    u8* decrypt_key = (u8*)&metadata[0];
-    u8* cmac_key = (u8*)&metadata[4];
+    dma_read(HW_KIRK_SRCADDR + 0x60, (u8*)&mode, sizeof(mode));
 
-    if (metadata[0x19] == AuthMode::AUTH_MODE_CMAC) {
-        // Decrypt the decryption and CMAC keys
-        aes_decrypt(AES_MASTER_KEY, decrypt_key, 2 * AES_KEY_SIZE);
+    if (mode != KirkCommand::KIRK_COMMAND_DECRYPT_PRIVATE) {
+        logger->warn("Invalid mode {:08X}", mode);
+        return KirkResult::KIRK_RESULT_INVALID_MODE;
+    }
 
-        print_key("Decryption key", decrypt_key);
-        print_key("Signature  key", cmac_key);
+    u32 body_size;
+    u32 data_offset;
 
-        // Now we verify the signature of the header
-        logger->debug("Verifying header CMAC");
+    dma_read(HW_KIRK_SRCADDR + 0x70, (u8*)&body_size, sizeof(body_size));
+    dma_read(HW_KIRK_SRCADDR + 0x74, (u8*)&data_offset, sizeof(data_offset));
 
-        if (!cmac_verify(cmac_key, (u8*)&metadata[0x18], METADATA_SIZE - 0x60, (u8*)&metadata[8])) {
-            logger->error("Header CMAC check failed");
-            exit(1);
+    if (body_size == 0) {
+        logger->warn("Body size is 0");
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
+
+    const u32 data_size = align_up(data_offset + body_size + 0x30);
+
+    u32 auth_mode;
+
+    dma_read(HW_KIRK_SRCADDR + 0x64, (u8*)&auth_mode, sizeof(auth_mode));
+
+    bool is_data_sig_valid = true;
+
+    // Get encrypted keys and decrypt them
+    u8 keys[2][AES_KEY_SIZE];
+
+    dma_read(HW_KIRK_SRCADDR, &keys[0][0], 2 * AES_KEY_SIZE);
+    aes_decrypt(AES_MASTER_KEY, &keys[0][0], 2 * AES_KEY_SIZE);
+
+    const u8* decrypt_key = &keys[0][0];
+    const u8* cmac_key = &keys[1][0];
+
+    print_key("AES  key", decrypt_key);
+    print_key("CMAC key", cmac_key);
+
+    // Read header and data for signature verification
+    u8 header[0x30];
+    std::vector<u8> data(data_size);
+
+    dma_read(HW_KIRK_SRCADDR + 0x60, header, sizeof(header));
+    dma_read(HW_KIRK_SRCADDR + 0x60, data.data(), data_size);
+
+    if ((auth_mode & 1) == AuthMode::AUTH_MODE_ECDSA) {
+        u8 r[DIGEST_SIZE];
+        u8 s[DIGEST_SIZE];
+
+        // Verify header signature
+        dma_read(HW_KIRK_SRCADDR + 0x10, r, sizeof(r));
+        dma_read(HW_KIRK_SRCADDR + 0x24, s, sizeof(s));
+
+        if (!ecdsa_verify(kirk1_verifier, r, s, header, sizeof(header))) {
+            logger->warn("Invalid header signature");
+            return KirkResult::KIRK_RESULT_INVALID_HEADER_SIG;
+        }
+
+        // Verify data signature
+        dma_read(HW_KIRK_SRCADDR + 0x38, r, sizeof(r));
+        dma_read(HW_KIRK_SRCADDR + 0x4C, s, sizeof(s));
+
+        if (!ecdsa_verify(kirk1_verifier, r, s, data.data(), data_size)) {
+            logger->warn("Invalid data signature");
+            
+            is_data_sig_valid = false;
         }
     } else {
-        const u8* header_r = (u8*)&metadata[0x04];
-        const u8* header_s = (u8*)&metadata[0x09];
-    
-        if (!ecdsa_verify(kirk1_verifier, header_r, header_s, (u8*)&metadata[0x18], METADATA_SIZE - 0x60)) {
-            logger->error("Header ECDSA check failed");
-            exit(1);
+        // CMAC
+        // Verify header signature
+        u8 hash[0x10];
+
+        dma_read(HW_KIRK_SRCADDR + 0x20, hash, sizeof(hash));
+
+        if (!cmac_verify(cmac_key, header, sizeof(header), hash)) {
+            logger->warn("Invalid header signature");
+            return KirkResult::KIRK_RESULT_INVALID_HEADER_SIG;
+        }
+
+        // Verify data signature
+        dma_read(HW_KIRK_SRCADDR + 0x30, hash, sizeof(hash));
+
+        if (!cmac_verify(cmac_key, data.data(), data_size, hash)) {
+            logger->warn("Invalid data signature");
+            
+            is_data_sig_valid = false;
         }
     }
 
-    // The data size is always aligned up when not on a 16-byte boundary
-    const u32 data_size = align_up(metadata[0x1C]);
-    const u32 padding = metadata[0x1D];
+    if (!is_data_sig_valid) {
+        u32 wipe_data;
 
-    const u32 data_offset = METADATA_SIZE + padding;
-    const u32 total_size = data_offset + data_size;
-    
-    std::vector<u8> buf(total_size);
+        dma_read(HW_KIRK_SRCADDR + 0x68, (u8*)&wipe_data, sizeof(wipe_data));
 
-    dma_read(HW_KIRK_SRCADDR, buf.data(), total_size);
+        if ((wipe_data & 1) != 0) {
+            const u32 size = align_up(data_offset + body_size + 0x90);
 
-    if (metadata[0x19] == AuthMode::AUTH_MODE_CMAC) {
-        logger->debug("Verifying data CMAC");
-
-        if (!cmac_verify(cmac_key, &buf[0x60], total_size - 0x60, (u8*)&metadata[12])) {
-            logger->error("Data CMAC check failed");
-            exit(1);
+            dma_clear(HW_KIRK_SRCADDR, size);
         }
-    } else {
-        const u8* data_r = (u8*)&metadata[0x0E];
-        const u8* data_s = (u8*)&metadata[0x13];
-    
-        if (!ecdsa_verify(kirk1_verifier, data_r, data_s, &buf[0x60], total_size - 0x60)) {
-            logger->error("Data ECDSA check failed");
-            exit(1);
-        }
+
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIG;
     }
 
-    // NOW we can decrypt the data
-    aes_decrypt(decrypt_key, &buf[data_offset], data_size);
-    dma_write(HW_KIRK_DSTADDR, &buf[data_offset], data_size);
+    body_size = align_up(body_size);
+
+    // Decrypt data
+    std::vector<u8> payload(body_size);
+
+    dma_read(HW_KIRK_SRCADDR + data_offset + 0x90, payload.data(), body_size);
+    aes_decrypt(decrypt_key, payload.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR, payload.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KirkError::KIRK_ERROR_OK;
+    return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
 static i32 command_decrypt_static() {
-    constexpr u64 HEADER_SIZE = 0x14;
+    logger->debug("DECRYPT_STATIC");
 
-    u32 header[HEADER_SIZE / sizeof(u32)];
+    // TODO: use named constants
 
-    dma_read(HW_KIRK_SRCADDR, (u8*)header, sizeof(header));
+    u32 mode;
+    u32 submode;
 
-    const u8 key_idx = (u8)header[3];
-    const u32 data_size = align_up(header[4]);
+    dma_read(HW_KIRK_SRCADDR + 0x00, (u8*)&mode, sizeof(mode));
+    dma_read(HW_KIRK_SRCADDR + 0x0C, (u8*)&submode, sizeof(submode));
 
-    if (key_idx > AES_KEYSTORE_SIZE) {
-        logger->error("Invalid key {} for DECRYPT_STATIC", key_idx);
-        exit(1);
+    if ((mode != 5) || ((submode >> 8) != 0)) {
+        logger->warn("Invalid mode {:08X} {:06X}", mode, submode >> 8);
+        return KirkResult::KIRK_RESULT_INVALID_MODE;
     }
 
-    logger->debug("DECRYPT_STATIC (key: {}, size: {})", key_idx, data_size);
+    u32 body_size;
 
-    std::vector<u8> buf(data_size);
+    dma_read(HW_KIRK_SRCADDR + 0x10, (u8*)&body_size, sizeof(body_size));
 
-    dma_read(HW_KIRK_SRCADDR + HEADER_SIZE, buf.data(), data_size);
-    aes_decrypt(AES_KEYSTORE[key_idx], buf.data(), data_size);
-    dma_write(HW_KIRK_DSTADDR, buf.data(), data_size);
+    if (body_size == 0) {
+        logger->warn("Body size is 0");
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
+
+    const u8 keyseed = submode;
+
+    if (keyseed >= AES_KEYSTORE_SIZE) {
+        logger->warn("Invalid keyseed {:02X}", keyseed);
+        return KirkResult::KIRK_RESULT_INVALID_DEC_KEYSEED;
+    }
+
+    body_size = align_up(body_size);
+
+    std::vector<u8> buf(body_size);
+
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
+    aes_decrypt(AES_KEYSTORE[keyseed], buf.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KirkError::KIRK_ERROR_OK;
+    return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
 static i32 command_hash() {
+    logger->debug("HASH");
+
+
     u32 data_size;
 
     dma_read(HW_KIRK_SRCADDR, (u8*)&data_size, sizeof(data_size));
 
-    logger->debug("HASH (size: {})", data_size);
+    if (data_size == 0) {
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
 
     std::vector<u8> buf(data_size);
     std::array<u8, DIGEST_SIZE> digest;
@@ -486,7 +580,7 @@ static i32 command_hash() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KirkError::KIRK_ERROR_OK;
+    return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
 static void increment_counter(u8* buf) {
@@ -512,12 +606,17 @@ static i32 command_seed() {
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
-    return KirkError::KIRK_ERROR_OK;
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
+static i32 command_certvry() {
+    logger->debug("CERTVRY");
+    return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
 static void end_first_phase(const int result) {
     HW_KIRK_STATUS.phase_done  = true;
-    HW_KIRK_STATUS.phase_error = result != KirkError::KIRK_ERROR_OK;
+    HW_KIRK_STATUS.phase_error = result != KirkResult::KIRK_RESULT_SUCCESS;
 
     HW_KIRK_RESULT = result;
 
@@ -539,6 +638,9 @@ static void start_first_phase() {
             break;
         case KirkCommand::KIRK_COMMAND_SEED:
             result = command_seed();
+            break;
+        case KirkCommand::KIRK_COMMAND_CERTVRY:
+            result = command_certvry();
             break;
         default:
             logger->error("Unimplemented command {:02X}", HW_KIRK_COMMAND);
