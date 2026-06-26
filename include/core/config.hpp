@@ -15,6 +15,9 @@ struct Configuration {
 
     // Path to a NAND image (32 MB)
     const char* nand_path;
+
+    // Path to a Memory Stick image (variable size)
+    const char* ms_path;
 };
 
 Configuration parse_args(const int argc, const char** argv);
