@@ -615,6 +615,8 @@ static i32 command_certvry() {
 }
 
 static void end_first_phase(const int result) {
+    HW_KIRK_PHASE.first_phase = false;
+
     HW_KIRK_STATUS.phase_done  = true;
     HW_KIRK_STATUS.phase_error = result != KirkResult::KIRK_RESULT_SUCCESS;
 
@@ -661,12 +663,18 @@ static void start_first_phase() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_PHASE:
+            logger->debug("PHASE read32");
+            return HW_KIRK_PHASE.raw;
         case IoAddress::IO_ADDRESS_RESULT:
             logger->debug("RESULT read32");
             return HW_KIRK_RESULT;
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
             return HW_KIRK_STATUS.raw;
+        case KIRK_ADDR + 0x020:
+            logger->warn("Unmapped read32 @ {:08X}", addr);
+            return 0;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
