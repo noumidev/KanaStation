@@ -16,6 +16,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/spi.hpp>
@@ -165,8 +166,7 @@ static void common_read(const u8 command) {
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
             logger->debug("GET_KERNEL_DIGITAL_KEY");
             
-            // All buttons unpressed
-            data = 0xFFEF7FFF;
+            data = kanacore::get_button_state();
             break;
         case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
             logger->debug("READ_CLOCK");
