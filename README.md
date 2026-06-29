@@ -15,6 +15,6 @@ This is a **work-in-progress** and very early!
 git clone --recursive https://github.com/noumidev/KanaStation
 cd KanaStation
 mkdir build && cd build
-cmake ..
+cmake .. -DCRYPTOPP_BUILD_TESTING=OFF
 make
 ```
