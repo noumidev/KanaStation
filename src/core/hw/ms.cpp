@@ -413,10 +413,14 @@ void initialize(const char* ms_path) {
 
     if (ms_path == nullptr) {
         sysctrl::clear_ms0_connected();
+    
+        kanacore::release_button(kanacore::Button::BUTTON_MS);
     } else if (ms.mount(ms_path)) {
+        logger->debug("Memory Stick connected");
+
         sysctrl::set_ms0_connected();
 
-        logger->debug("MS connected");
+        kanacore::press_button(kanacore::Button::BUTTON_MS);
     }
 }
 
