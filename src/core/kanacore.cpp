@@ -19,6 +19,7 @@
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/ddr_ram.hpp>
+#include <core/hw/dmacplus.hpp>
 #include <core/hw/edram.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/i2c.hpp>
@@ -47,6 +48,8 @@ static std::shared_ptr<spdlog::logger> logger;
 static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
 static hw::allegrex::Allegrex me(hw::allegrex::CpuId::CPU_ID_ME);
 
+static bool frame_end = false;
+
 // Move this to display code later on
 static void vsync(const int) {
     hw::intc::assert_sc_interrupt(30);
@@ -57,6 +60,10 @@ static void vsync(const int) {
         0,
         scheduler::from_microseconds(16666)
     );
+
+    hw::dmacplus::scanout();
+
+    frame_end = true;
 }
 
 void initialize(const Configuration config) {
@@ -84,6 +91,7 @@ void initialize(const Configuration config) {
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::ddr_ram::initialize();
+    hw::dmacplus::initialize();
     hw::edram::initialize();
     hw::gpio::initialize();
     hw::i2c::initialize();
@@ -112,6 +120,7 @@ void soft_reset() {
     hw::audio::soft_reset();
     hw::boot_rom::soft_reset();
     hw::ddr_ram::soft_reset();
+    hw::dmacplus::soft_reset();
     hw::edram::soft_reset();
     hw::gpio::soft_reset();
     hw::i2c::soft_reset();
@@ -141,6 +150,7 @@ void hard_reset() {
     hw::audio::hard_reset();
     hw::boot_rom::hard_reset();
     hw::ddr_ram::hard_reset();
+    hw::dmacplus::hard_reset();
     hw::edram::hard_reset();
     hw::gpio::hard_reset();
     hw::i2c::hard_reset();
@@ -180,6 +190,7 @@ void shutdown() {
     hw::audio::shutdown();
     hw::boot_rom::shutdown();
     hw::ddr_ram::shutdown();
+    hw::dmacplus::shutdown();
     hw::edram::shutdown();
     hw::gpio::shutdown();
     hw::i2c::shutdown();
@@ -216,10 +227,15 @@ hw::bus::Bus* get_me_bus_ptr() {
     return me.get_bus_ptr();
 }
 
-void run() {
-    while (scheduler::run()) {
+bool run() {
+    // Dirty way to exit the main loop, but it'll suffice for now
+    frame_end = false;
 
+    while (!frame_end) {
+        (void)scheduler::run();
     }
+
+    return false;
 }
 
 };
