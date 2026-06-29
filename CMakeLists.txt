@@ -24,6 +24,8 @@ string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_R
 # Set include directories
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+add_subdirectory(external/SDL EXCLUDE_FROM_ALL)
+
 # Set source files
 set(SOURCES
     src/core/config.cpp
@@ -90,4 +92,4 @@ set(HEADERS
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE cryptopp spdlog)
+target_link_libraries(${PROJECT_NAME} PRIVATE cryptopp spdlog SDL3::SDL3)

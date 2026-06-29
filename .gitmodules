@@ -4,3 +4,6 @@
 [submodule "external/cryptopp-cmake"]
 	path = external/cryptopp-cmake
 	url = https://github.com/abdes/cryptopp-cmake
+[submodule "external/SDL"]
+	path = external/SDL
+	url = https://github.com/libsdl-org/SDL
