@@ -32,6 +32,8 @@ enum IoAddress {
     IO_ADDRESS_LCDC_FBWIDTH  = DMACPLUS_ADDR + 0x108,
     IO_ADDRESS_LCDC_FBSTRIDE = DMACPLUS_ADDR + 0x10C,
     IO_ADDRESS_LCDC_FBCTRL   = DMACPLUS_ADDR + 0x110,
+    IO_ADDRESS_CSC_Y0ADDR    = DMACPLUS_ADDR + 0x120,
+    IO_ADDRESS_CSC_START     = DMACPLUS_ADDR + 0x160,
 };
 
 #define HW_DMACPLUS_LCDC_FBADDR   ctx.framebuffer_addr
@@ -61,6 +63,11 @@ static struct {
 static std::shared_ptr<spdlog::logger> logger;
 
 static u32 read(const u32 addr) {
+    if ((addr >= IoAddress::IO_ADDRESS_CSC_Y0ADDR) && (addr <= IoAddress::IO_ADDRESS_CSC_START)) {
+        logger->warn("Unmapped CSC read32 @ {:08X}", addr);
+        return 0;
+    }
+
     switch (addr) {
         case IoAddress::IO_ADDRESS_LCDC_FBADDR:
             logger->debug("LCDC_FBADDR read32");
@@ -84,6 +91,11 @@ static u32 read(const u32 addr) {
 }
 
 static void write(const u32 addr, const u32 data) {
+    if ((addr >= IoAddress::IO_ADDRESS_CSC_Y0ADDR) && (addr <= IoAddress::IO_ADDRESS_CSC_START)) {
+        logger->warn("Unmapped CSC write32 @ {:08X} = {:08X}", addr, data);
+        return;
+    }
+
     switch (addr) {
         case IoAddress::IO_ADDRESS_LCDC_FBADDR:
             logger->debug("LCDC_FBADDR write32 = {:08X}", data);
