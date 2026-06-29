@@ -341,19 +341,24 @@ static void start_dma() {
         transfer_spare
     );
 
-    if (is_write) {
-        logger->error("Unimplemented NAND page program via DMA");
-        exit(1);
-    }
-
     const u64 nand_offset = HW_NAND_DMAPAGE * PAGE_SIZE_WITH_ECC;
 
-    if (transfer_data) {
-        std::memcpy(dma_buffer.data_area, nand.data() + nand_offset, PAGE_SIZE);
-    }
+    if (is_write) {
+        if (transfer_data) {
+            std::memcpy(nand.data() + nand_offset, dma_buffer.data_area, PAGE_SIZE);
+        }
 
-    if (transfer_spare) {
-        std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
+        if (transfer_spare) {
+            std::memcpy(nand.data() + nand_offset + PAGE_SIZE, dma_buffer.spare_area, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
+        }
+    } else {
+        if (transfer_data) {
+            std::memcpy(dma_buffer.data_area, nand.data() + nand_offset, PAGE_SIZE);
+        }
+
+        if (transfer_spare) {
+            std::memcpy(dma_buffer.spare_area, nand.data() + nand_offset + PAGE_SIZE, PAGE_SIZE_WITH_ECC - PAGE_SIZE);
+        }
     }
 
     scheduler::schedule_event(
