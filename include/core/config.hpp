@@ -20,6 +20,6 @@ struct Configuration {
     const char* ms_path;
 };
 
-Configuration parse_args(const int argc, const char** argv);
+Configuration parse_args(const int argc, char** argv);
 
 }

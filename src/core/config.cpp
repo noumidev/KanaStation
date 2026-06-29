@@ -9,7 +9,7 @@
 
 namespace kanacore {
 
-Configuration parse_args(const int argc, const char** argv) {
+Configuration parse_args(const int argc, char** argv) {
     // Required
     constexpr int NUM_ARGS = 2;
 
