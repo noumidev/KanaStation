@@ -24,6 +24,6 @@ hw::allegrex::Allegrex* get_me_ptr();
 hw::bus::Bus* get_sc_bus_ptr();
 hw::bus::Bus* get_me_bus_ptr();
 
-void run();
+bool run();
 
 };
