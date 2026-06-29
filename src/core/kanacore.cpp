@@ -48,6 +48,8 @@ static std::shared_ptr<spdlog::logger> logger;
 static hw::allegrex::Allegrex sc(hw::allegrex::CpuId::CPU_ID_SC);
 static hw::allegrex::Allegrex me(hw::allegrex::CpuId::CPU_ID_ME);
 
+static u32 button_state = 0;
+
 static bool frame_end = false;
 
 // Move this to display code later on
@@ -225,6 +227,19 @@ hw::bus::Bus* get_sc_bus_ptr() {
 
 hw::bus::Bus* get_me_bus_ptr() {
     return me.get_bus_ptr();
+}
+
+void press_button(const Button button) {
+    button_state |= button;
+}
+
+void release_button(const Button button) {
+    button_state &= ~button;
+}
+
+u32 get_button_state() {
+    // A lot of buttons are active-low, hence the XOR
+    return button_state ^ 0xFFEF7FFF;
 }
 
 bool run() {
