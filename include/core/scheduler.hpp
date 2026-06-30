@@ -30,6 +30,7 @@ enum EventType {
     MEMORY_STICK,
     NAND_DMA,
     VME_DMA,
+    DMACPLUS_DMA,
     SYSTIME,
     VSYNC,
     NUM_EVENT_TYPES,
