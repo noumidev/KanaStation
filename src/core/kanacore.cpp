@@ -20,7 +20,6 @@
 #include <core/hw/bus.hpp>
 #include <core/hw/ddr_ram.hpp>
 #include <core/hw/dmacplus.hpp>
-#include <core/hw/edram.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/i2c.hpp>
 #include <core/hw/intc.hpp>
@@ -35,6 +34,8 @@
 #include <core/hw/systime.hpp>
 #include <core/hw/allegrex/interpreter.hpp>
 #include <core/hw/allegrex/scratchpad.hpp>
+#include <core/hw/ge/edram.hpp>
+#include <core/hw/ge/ge.hpp>
 #include <core/hw/me/scratchpad.hpp>
 #include <core/hw/me/vme_dmac.hpp>
 #include <core/hw/uart/uart.hpp>
@@ -94,7 +95,6 @@ void initialize(const Configuration config) {
     hw::boot_rom::initialize(config.boot_path);
     hw::ddr_ram::initialize();
     hw::dmacplus::initialize();
-    hw::edram::initialize();
     hw::gpio::initialize();
     hw::i2c::initialize();
     hw::intc::initialize();
@@ -109,6 +109,8 @@ void initialize(const Configuration config) {
     hw::systime::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();
+    hw::ge::initialize();
+    hw::ge::edram::initialize();
     hw::me::scratchpad::initialize();
     hw::me::vme_dmac::initialize();
     hw::uart::initialize();
@@ -123,7 +125,6 @@ void soft_reset() {
     hw::boot_rom::soft_reset();
     hw::ddr_ram::soft_reset();
     hw::dmacplus::soft_reset();
-    hw::edram::soft_reset();
     hw::gpio::soft_reset();
     hw::i2c::soft_reset();
     hw::intc::soft_reset();
@@ -138,6 +139,8 @@ void soft_reset() {
     hw::systime::soft_reset();
     hw::allegrex::interpreter::soft_reset();
     hw::allegrex::scratchpad::soft_reset();
+    hw::ge::soft_reset();
+    hw::ge::edram::soft_reset();
     hw::me::scratchpad::soft_reset();
     hw::me::vme_dmac::soft_reset();
     hw::uart::soft_reset();
@@ -153,7 +156,6 @@ void hard_reset() {
     hw::boot_rom::hard_reset();
     hw::ddr_ram::hard_reset();
     hw::dmacplus::hard_reset();
-    hw::edram::hard_reset();
     hw::gpio::hard_reset();
     hw::i2c::hard_reset();
     hw::intc::hard_reset();
@@ -168,6 +170,8 @@ void hard_reset() {
     hw::systime::hard_reset();
     hw::allegrex::interpreter::hard_reset();
     hw::allegrex::scratchpad::hard_reset();
+    hw::ge::hard_reset();
+    hw::ge::edram::hard_reset();
     hw::me::scratchpad::hard_reset();
     hw::me::vme_dmac::hard_reset();
     hw::uart::hard_reset();
@@ -193,7 +197,6 @@ void shutdown() {
     hw::boot_rom::shutdown();
     hw::ddr_ram::shutdown();
     hw::dmacplus::shutdown();
-    hw::edram::shutdown();
     hw::gpio::shutdown();
     hw::i2c::shutdown();
     hw::intc::shutdown();
@@ -208,6 +211,8 @@ void shutdown() {
     hw::systime::shutdown();
     hw::allegrex::interpreter::shutdown();
     hw::allegrex::scratchpad::shutdown();
+    hw::ge::shutdown();
+    hw::ge::edram::shutdown();
     hw::me::scratchpad::shutdown();
     hw::me::vme_dmac::shutdown();
     hw::uart::shutdown();

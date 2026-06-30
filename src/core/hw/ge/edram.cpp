@@ -3,9 +3,9 @@
  * Copyright (C) 2026  noumidev
  */
 
-/* core/hw/edram.cpp - Graphics Engine EDRAM (2 MB) */
+/* core/hw/ge/edram.cpp - Graphics Engine EDRAM (2 MB) */
 
-#include <core/hw/edram.hpp>
+#include <core/hw/ge/edram.hpp>
 
 #include <array>
 #include <cassert>
@@ -16,7 +16,7 @@
 #include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 
-namespace kanacore::hw::edram {
+namespace kanacore::hw::ge::edram {
 
 using namespace common;
 

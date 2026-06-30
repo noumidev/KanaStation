@@ -3,12 +3,13 @@
  * Copyright (C) 2026  noumidev
  */
 
-/* core/hw/edram.hpp - Graphics Engine EDRAM (2 MB) */
+/* core/hw/ge/ge.hpp - GraphicsEngine interface */
 
 #pragma once
 
-// Move this to a "ge::" namespace
-namespace kanacore::hw::edram {
+#include <common/types.hpp>
+
+namespace kanacore::hw::ge {
 
 void initialize();
 void soft_reset();

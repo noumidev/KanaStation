@@ -36,7 +36,6 @@ set(SOURCES
     src/core/hw/bus.cpp
     src/core/hw/ddr_ram.cpp
     src/core/hw/dmacplus.cpp
-    src/core/hw/edram.cpp
     src/core/hw/gpio.cpp
     src/core/hw/i2c.cpp
     src/core/hw/intc.cpp
@@ -52,6 +51,8 @@ set(SOURCES
     src/core/hw/allegrex/allegrex.cpp
     src/core/hw/allegrex/interpreter.cpp
     src/core/hw/allegrex/scratchpad.cpp
+    src/core/hw/ge/edram.cpp
+    src/core/hw/ge/ge.cpp
     src/core/hw/me/scratchpad.cpp
     src/core/hw/me/vme_dmac.cpp
     src/core/hw/uart/uart.cpp
@@ -69,7 +70,6 @@ set(HEADERS
     include/core/hw/bus.hpp
     include/core/hw/ddr_ram.hpp
     include/core/hw/dmacplus.hpp
-    include/core/hw/edram.hpp
     include/core/hw/gpio.hpp
     include/core/hw/i2c.hpp
     include/core/hw/intc.hpp
@@ -85,6 +85,8 @@ set(HEADERS
     include/core/hw/allegrex/allegrex.hpp
     include/core/hw/allegrex/interpreter.hpp
     include/core/hw/allegrex/scratchpad.hpp
+    include/core/hw/ge/edram.hpp
+    include/core/hw/ge/ge.hpp
     include/core/hw/me/scratchpad.hpp
     include/core/hw/me/vme_dmac.hpp
     include/core/hw/uart/uart.hpp
