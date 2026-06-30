@@ -14,6 +14,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 
 namespace kanacore::hw::allegrex {
     
@@ -73,6 +74,10 @@ void Allegrex::write(const u32 addr, const T data) {
 
     // TODO: properly handle memory segments
     const u32 masked_addr = addr & 0x1FFFFFFF;
+
+    if ((cpu_id == CpuId::CPU_ID_ME) && (masked_addr == 0x1C100044) && ((data & 1) != 0)) {
+        intc::assert_sc_interrupt(31);
+    }
 
     bus.write<T>(masked_addr, data);
 }
@@ -449,6 +454,14 @@ void Allegrex::set_fgr_raw(const u32 idx, const u32 data) {
     assert(idx < Fpu::NUM_REGS);
 
     fpu.fgrs[idx].raw = data;
+}
+
+void Allegrex::set_fpu_cond(const bool cond) {
+    fpu.cond = cond;
+}
+
+bool Allegrex::get_fpu_cond() const {
+    return fpu.cond;
 }
 
 u32 Allegrex::fetch_instr() {

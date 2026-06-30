@@ -156,6 +156,8 @@ struct Fpu {
             common::u32               : 7;
         };
     } status;
+
+    bool cond;
 };
 
 struct Allegrex {
@@ -267,6 +269,9 @@ public:
     common::u32 get_fgr_raw(const common::u32 idx) const;
     void set_fgr(const common::u32 idx, const common::f32 data);
     void set_fgr_raw(const common::u32 idx, const common::u32 data);
+
+    void set_fpu_cond(const bool cond);
+    bool get_fpu_cond() const;
 
     template<typename T>
     T read(const common::u32 addr);
