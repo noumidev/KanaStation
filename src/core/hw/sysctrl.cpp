@@ -19,6 +19,7 @@
 #include <core/kanacore.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 #include <core/hw/shared_ram.hpp>
 #include <core/hw/allegrex/allegrex.hpp>
 
@@ -38,6 +39,7 @@ enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
     IO_ADDRESS_RAMSIZE    = SYSCTRL_ADDR + 0x040,
+    IO_ADDRESS_POSTME     = SYSCTRL_ADDR + 0x044,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
@@ -232,6 +234,13 @@ static void write(const u32 addr, const u32 data) {
             
             // Tachyon version is read-only
             HW_SYSCTRL_RAMSIZE = (HW_SYSCTRL_RAMSIZE & 0xFF000800) | (data & 0xFFF7FF);
+            break;
+        case IoAddress::IO_ADDRESS_POSTME:
+            logger->debug("POSTME write32 = {:08X}", data);
+            
+            if ((data & 1) != 0) {
+                intc::assert_me_interrupt(31);
+            }
             break;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN write32 = {:08X}", data);
