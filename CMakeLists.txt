@@ -35,6 +35,7 @@ set(SOURCES
     src/core/hw/boot_rom.cpp
     src/core/hw/bus.cpp
     src/core/hw/ddr_ram.cpp
+    src/core/hw/dmac.cpp
     src/core/hw/dmacplus.cpp
     src/core/hw/gpio.cpp
     src/core/hw/i2c.cpp
@@ -69,6 +70,7 @@ set(HEADERS
     include/core/hw/boot_rom.hpp
     include/core/hw/bus.hpp
     include/core/hw/ddr_ram.hpp
+    include/core/hw/dmac.hpp
     include/core/hw/dmacplus.hpp
     include/core/hw/gpio.hpp
     include/core/hw/i2c.hpp

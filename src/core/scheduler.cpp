@@ -40,6 +40,7 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "Memory Stick",
     "NAND DMA",
     "VME DMA",
+    "DMAC DMA",
     "DMACplus DMA",
     "SysTime",
     "VSYNC",
