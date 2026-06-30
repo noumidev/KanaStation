@@ -144,9 +144,17 @@ enum CopOpcode {
     COP_OPCODE_CFC       = 0x02,
     COP_OPCODE_MTC       = 0x04,
     COP_OPCODE_CTC       = 0x06,
+    COP_OPCODE_BC        = 0x08,
     COP_OPCODE_SECONDARY = 0x10, // CP0
     COP_OPCODE_SINGLE    = 0x10, // FPU
     COP_OPCODE_WORD      = 0x14, // FPU
+};
+
+enum CopBranchOpcode {
+    COP_BRANCH_OPCODE_BCF  = 0x00,
+    COP_BRANCH_OPCODE_BCT  = 0x01,
+    COP_BRANCH_OPCODE_BCFL = 0x02,
+    COP_BRANCH_OPCODE_BCTL = 0x03,
 };
 
 enum Cp0Opcode {
@@ -159,8 +167,11 @@ enum FpuOpcode {
     FPU_OPCODE_MUL    = 0x02,
     FPU_OPCODE_DIV    = 0x03,
     FPU_OPCODE_SQRT   = 0x04,
+    FPU_OPCODE_MOV    = 0x06,
+    FPU_OPCODE_NEG    = 0x07,
     FPU_OPCODE_TRUNCW = 0x0D,
     FPU_OPCODE_CVTS   = 0x20,
+    FPU_OPCODE_C      = 0x30,
 };
 
 enum BitShuffleOpcode {
@@ -202,6 +213,74 @@ static i64 i_and(Allegrex* cpu, const u32 instr) {
 
 static i64 i_andi(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, cpu->get_reg(RS) & UIMM);
+    return 1;
+}
+
+template<int cop_num>
+static i64 i_bcf(Allegrex* cpu, const u32 instr) {
+    bool cond;
+
+    switch (cop_num) {
+        case CopNum::COP_NUM_FPU:
+            cond = cpu->get_fpu_cond();
+            break;
+        default:
+            cpu->get_logger()->error("Unimplemented CP{} for BCF", cop_num);
+            exit(1);
+    }
+
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), !cond, 0);
+    return 1;
+}
+
+template<int cop_num>
+static i64 i_bcfl(Allegrex* cpu, const u32 instr) {
+    bool cond;
+
+    switch (cop_num) {
+        case CopNum::COP_NUM_FPU:
+            cond = cpu->get_fpu_cond();
+            break;
+        default:
+            cpu->get_logger()->error("Unimplemented CP{} for BCFL", cop_num);
+            exit(1);
+    }
+
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), !cond, 0);
+    return 1;
+}
+
+template<int cop_num>
+static i64 i_bct(Allegrex* cpu, const u32 instr) {
+    bool cond;
+
+    switch (cop_num) {
+        case CopNum::COP_NUM_FPU:
+            cond = cpu->get_fpu_cond();
+            break;
+        default:
+            cpu->get_logger()->error("Unimplemented CP{} for BCT", cop_num);
+            exit(1);
+    }
+
+    cpu->branch<false>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cond, 0);
+    return 1;
+}
+
+template<int cop_num>
+static i64 i_bctl(Allegrex* cpu, const u32 instr) {
+    bool cond;
+
+    switch (cop_num) {
+        case CopNum::COP_NUM_FPU:
+            cond = cpu->get_fpu_cond();
+            break;
+        default:
+            cpu->get_logger()->error("Unimplemented CP{} for BCTL", cop_num);
+            exit(1);
+    }
+
+    cpu->branch<true>(cpu->get_pc() + ((i32)(i16)UIMM << 2), cond, 0);
     return 1;
 }
 
@@ -377,13 +456,47 @@ static i64 i_fadd(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_fc(Allegrex* cpu, const u32 instr) {
+    const f32 s = cpu->get_fgr(FS);
+    const f32 t = cpu->get_fgr(FT);
+    
+    u32 conds = 0;
+
+    if (std::isnan(s) || std::isnan(t)) {
+        // Unordered
+        conds |= 1;
+    } else {
+        if (s < t) {
+            conds |= 4;
+        }
+
+        if (s == t) {
+            conds |= 2;
+        }
+    }
+
+    cpu->set_fpu_cond(((instr & 7) & conds) != 0);
+
+    return 1;
+}
+
 static i64 i_fdiv(Allegrex* cpu, const u32 instr) {
     cpu->set_fgr(FD, cpu->get_fgr(FS) / cpu->get_fgr(FT));
     return 1;
 }
 
+static i64 i_fmov(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, cpu->get_fgr(FS));
+    return 1;
+}
+
 static i64 i_fmul(Allegrex* cpu, const u32 instr) {
     cpu->set_fgr(FD, cpu->get_fgr(FS) * cpu->get_fgr(FT));
+    return 1;
+}
+
+static i64 i_fneg(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, -cpu->get_fgr(FS));
     return 1;
 }
 
@@ -496,6 +609,9 @@ static i64 i_mfc(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_reg(RT, cpu->get_status_reg(RD));
+            break;
+        case CopNum::COP_NUM_FPU:
+            cpu->set_reg(RT, cpu->get_fgr_raw(RD));
             break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for MFC", cop_num);
@@ -793,6 +909,21 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
             return i_mtc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_CTC:
             return i_ctc<cop_num>(cpu, instr);
+        case CopOpcode::COP_OPCODE_BC:
+            switch (RT) {
+                case CopBranchOpcode::COP_BRANCH_OPCODE_BCF:
+                    return i_bcf<cop_num>(cpu, instr);
+                case CopBranchOpcode::COP_BRANCH_OPCODE_BCT:
+                    return i_bct<cop_num>(cpu, instr);
+                case CopBranchOpcode::COP_BRANCH_OPCODE_BCFL:
+                    return i_bcfl<cop_num>(cpu, instr);
+                case CopBranchOpcode::COP_BRANCH_OPCODE_BCTL:
+                    return i_bctl<cop_num>(cpu, instr);
+                default:
+                    cpu->get_logger()->error("Undefined CP{} BC instruction {:02X} ({:08X}) @ {:08X}", cop_num, RT, instr, cpu->get_instr_addr());
+                    cpu->dump_state();
+                    exit(1);
+            }
         case CopOpcode::COP_OPCODE_SECONDARY:
             assert(cop_num <= COP_NUM_FPU);
 
@@ -806,6 +937,10 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                         exit(1);
                 }
             } else {
+                if (FUNCT >= FpuOpcode::FPU_OPCODE_C) {
+                    return i_fc(cpu, instr);
+                }
+
                 switch (FUNCT) {
                     case FpuOpcode::FPU_OPCODE_ADD:
                         return i_fadd(cpu, instr);
@@ -817,6 +952,10 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                         return i_fdiv(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_SQRT:
                         return i_fsqrt(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_MOV:
+                        return i_fmov(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_NEG:
+                        return i_fneg(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_TRUNCW:
                         return i_truncw(cpu, instr);
                     default:
