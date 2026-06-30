@@ -167,7 +167,9 @@ static void end_sc128_transfer(const int) {
     HW_DMACPLUS_SC128_CONFIG.active = 0;
     HW_DMACPLUS_SC128_CONFIG.channel_enable = 0;
 
-    assert_terminal_count_interrupt(4, HW_DMACPLUS_SC128_CONFIG.interrupt_mask);
+    if (HW_DMACPLUS_SC128_CONTROL.interrupt_enable) {
+        assert_terminal_count_interrupt(4, HW_DMACPLUS_SC128_CONFIG.interrupt_mask);
+    }
 }
 
 static void start_sc128_transfer() {
@@ -185,7 +187,7 @@ static void start_sc128_transfer() {
     // Sanity checks
 
     // No link?
-    assert(HW_DMACPLUS_SC128_CONTROL.interrupt_enable);
+    assert(HW_DMACPLUS_SC128_LINKADDR == 0);
     // Memory to memory
     assert(HW_DMACPLUS_SC128_CONFIG.flow_control == 0);
     // Transfer width is 128-bit
@@ -246,7 +248,7 @@ static u32 read(const u32 addr) {
             logger->debug("LCDC_FBCTRL read32");
             return HW_DMACPLUS_LCDC_FBCTRL.raw;
         default:
-            logger->warn("Unmapped read32 @ {:08X}", addr);
+            logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
     }
 }
@@ -328,7 +330,7 @@ static void write(const u32 addr, const u32 data) {
             set_sc128_config(data);
             break;
         default:
-            logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
+            logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             exit(1);
     }
 }
