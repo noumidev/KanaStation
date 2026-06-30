@@ -77,14 +77,17 @@ void shutdown() {
 
 }
 
-void schedule_event(const EventType type, Callback callback, const int arg, const i64 cycles) {
+void schedule_event(const EventType type, Callback callback, const int arg, const i64 cycles, const bool auto_cancel) {
     hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
 
     logger->debug("Scheduling event {} with arg: {} in {} cycles", EVENT_TYPE_NAMES[type], arg, cycles);
 
     assert(type < EventType::NUM_EVENT_TYPES);
 
-    cancel_event(type);
+    if (auto_cancel) {
+        // Auto-canceling events would break a bunch, so don't force it
+        cancel_event(type);
+    }
 
     const i64 event_timestamp = *sc->get_cycles() + cycles;
 

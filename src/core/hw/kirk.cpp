@@ -655,7 +655,8 @@ static void start_first_phase() {
         scheduler::EventType::KIRK_1ST_PHASE,
         end_first_phase,
         result,
-        scheduler::from_microseconds(5)
+        scheduler::from_microseconds(5),
+        true
     );
 
     HW_KIRK_STATUS.phase_done = false;

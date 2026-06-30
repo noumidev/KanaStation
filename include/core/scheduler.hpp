@@ -49,7 +49,14 @@ inline common::i64 from_microseconds(const common::i64 ms) {
     return ms * ONE_MICROSECOND;
 }
 
-void schedule_event(const EventType type, Callback callback, const int arg, const common::i64 cycles);
+void schedule_event(
+    const EventType type,
+    Callback callback,
+    const int arg,
+    const common::i64 cycles,
+    const bool auto_cancel = false
+);
+
 void cancel_event(const EventType type);
 
 bool run();

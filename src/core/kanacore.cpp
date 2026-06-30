@@ -61,7 +61,8 @@ static void vsync(const int) {
         scheduler::EventType::VSYNC,
         vsync,
         0,
-        scheduler::from_microseconds(16666)
+        scheduler::from_microseconds(16666),
+        true
     );
 
     hw::dmacplus::scanout();
@@ -186,7 +187,8 @@ void hard_reset() {
         scheduler::EventType::VSYNC,
         vsync,
         0,
-        scheduler::from_microseconds(16666)
+        scheduler::from_microseconds(16666),
+        true
     );
 }
 

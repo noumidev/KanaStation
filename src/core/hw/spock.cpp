@@ -166,12 +166,19 @@ static void start_command() {
             exit(1);
     }
 
+    if (command == SpockCommand::SPOCK_COMMAND_RESET) {
+        // Seems to not trigger an interrupt. The firmware immediately sends a new command
+        // after RESET
+        return;
+    }
+
     // Timings will vary between commands, so we just pick a short delay for now
     scheduler::schedule_event(
         scheduler::EventType::SPOCK,
         end_command,
         result,
-        scheduler::from_microseconds(command == SpockCommand::SPOCK_COMMAND_RESET ? 1 : 5)
+        scheduler::from_microseconds(5),
+        true
     );
 
     HW_SPOCK_STATUS.busy = 1;

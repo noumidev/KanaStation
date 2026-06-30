@@ -365,7 +365,8 @@ static void start_dma() {
         scheduler::EventType::NAND_DMA,
         end_dma,
         is_write,
-        scheduler::from_microseconds(60)
+        scheduler::from_microseconds(60),
+        true
     );
 }
 
