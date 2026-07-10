@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cinttypes>
+#include <cstring>
 
 namespace common {
 
@@ -46,6 +47,22 @@ inline u64 byteswap(const u64 data) {
     n = ((n & 0x00FF00FF00FF00FFULL) <<  8) | ((n & 0xFF00FF00FF00FF00ULL) >>  8);
 
     return n;
+}
+
+inline u32 from_f32(const f32 data) {
+    u32 raw;
+
+    std::memcpy(&raw, &data, sizeof(data));
+
+    return raw;
+}
+
+inline f32 from_u32(const u32 data) {
+    f32 flt;
+
+    std::memcpy(&flt, &data, sizeof(data));
+
+    return flt;
 }
 
 }
