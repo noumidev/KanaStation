@@ -46,6 +46,7 @@ enum SysconCommand {
     SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS = 0x0B,
     SYSCON_COMMAND_GET_WAKE_UP_FACTOR      = 0x0E,
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP    = 0x11,
+    SYSCON_COMMAND_WRITE_SCRATCHPAD        = 0x23,
     SYSCON_COMMAND_READ_SCRATCHPAD         = 0x24,
     SYSCON_COMMAND_SEND_SETPARAM           = 0x25,
     SYSCON_COMMAND_CTRL_TACHYON_WDT        = 0x31,
@@ -321,6 +322,21 @@ static void command_send_setparam() {
     write_transmit_data(nullptr, 0);
 }
 
+static void command_write_scratchpad() {
+    const u8 idx  = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] >> 2;
+    const u8 size = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3;
+
+    logger->debug("WRITE_SCRATCHPAD (idx: {}, size: {})", idx, size);
+
+    assert((idx + size) < SCRATCHPAD_SIZE);
+
+    for (u8 i = 0; i < size; i++) {
+        ctx.scratchpad[idx + i] = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA + i];
+    }
+
+    write_transmit_data(nullptr, 0);
+}
+
 static void start_command() {
     u8* buf = receive_buffer.buf;
 
@@ -340,6 +356,9 @@ static void start_command() {
             break;
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
             command_get_baryon_timestamp();
+            break;
+        case SysconCommand::SYSCON_COMMAND_WRITE_SCRATCHPAD:
+            command_write_scratchpad();
             break;
         case SysconCommand::SYSCON_COMMAND_READ_SCRATCHPAD:
             command_read_scratchpad();
