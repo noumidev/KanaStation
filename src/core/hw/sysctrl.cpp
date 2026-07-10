@@ -190,7 +190,7 @@ static u32 read(const u32 addr) {
     }
 }
 
-static void write_reset_enable(const u32 data) {
+static void write_reset_enable(u32 data) {
     constexpr const char* RESET_DEVICE_NAMES[] = {
         "TOP?" , "SC"   , "ME"  , "AW?", "VME", "AVC"     , "USB" , "ATA HDD?",
         "MSIF0", "MSIF1", "KIRK", "N/A", "???", "USB Host", "MS0?", "MS1?"    ,
@@ -207,6 +207,8 @@ static void write_reset_enable(const u32 data) {
             if ((reset_funcs[i] != nullptr) && (i == ResetDevice::RESET_DEVICE_SC)) {
                 // This needs to reset here
                 reset_funcs[i]();
+
+                data &= ~(1 << ResetDevice::RESET_DEVICE_SC);
             }
         } else if (((HW_SYSCTRL_RESETEN & (1 << i)) != 0) && ((data & (1 << i)) == 0)) {
             logger->debug("Reset cleared for {}", RESET_DEVICE_NAMES[i]);

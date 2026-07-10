@@ -73,8 +73,17 @@ void initialize(const char* boot_path) {
 }
 
 void soft_reset() {
+    static bool RESET_ONCE = false;
+
+    if (RESET_ONCE) {
+        // Further resets don't do anything
+        return;
+    }
+
     // Unmaps boot ROM after SC reset
     kanacore::get_sc_bus_ptr()->unmap(BOOT_ROM_ADDR, BOOT_ROM_SIZE);
+
+    RESET_ONCE = true;
 }
 
 void hard_reset() {

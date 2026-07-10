@@ -53,6 +53,13 @@ void initialize() {
 }
 
 void soft_reset() {
+    static bool RESET_ONCE = false;
+
+    if (RESET_ONCE) {
+        // Further resets don't do anything
+        return;
+    }
+
     const bus::PageDescriptor page_desc {
         .read8_func   = read<u8>,
         .read16_func  = read<u16>,
@@ -71,6 +78,8 @@ void soft_reset() {
     // area is the first 4 KB of shared RAM, we manually move said area to the beginning
     // of shared RAM (needed for IPL boot)
     std::memcpy(shared_ram.data(), shared_ram.data() + (SCRATCHPAD_ADDR & SHARED_RAM_MASK), SCRATCHPAD_SIZE);
+
+    RESET_ONCE = true;
 }
 
 void hard_reset() {
