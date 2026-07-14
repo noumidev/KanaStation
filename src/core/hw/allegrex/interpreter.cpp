@@ -369,6 +369,8 @@ static i64 i_bnel(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_cfc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(cop_num));
+
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_reg(RT, cpu->get_control_reg(RD));
@@ -391,6 +393,8 @@ static i64 i_clz(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_ctc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(cop_num));
+
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_control_reg(RD, cpu->get_reg(RT));
@@ -579,6 +583,8 @@ static i64 i_lw(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_lwc1(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU));
+
     cpu->set_fgr_raw(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
     return 1;
 }
@@ -606,6 +612,8 @@ static i64 i_max(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_mfc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(cop_num));
+
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_reg(RT, cpu->get_status_reg(RD));
@@ -653,6 +661,8 @@ static i64 i_movz(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_mtc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(cop_num));
+
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
             cpu->set_status_reg(RD, cpu->get_reg(RT));
@@ -808,6 +818,8 @@ static i64 i_sw(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_swc1(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU));
+
     cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM, cpu->get_fgr_raw(RT));
     return 1;
 }
@@ -900,6 +912,8 @@ static i64 i_cache(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_cop(Allegrex* cpu, const u32 instr) {
+    assert(cpu->is_coprocessor_usable(cop_num));
+
     switch (RS) {
         case CopOpcode::COP_OPCODE_MFC:
             return i_mfc<cop_num>(cpu, instr);

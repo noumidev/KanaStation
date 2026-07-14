@@ -261,6 +261,15 @@ public:
     void assert_interrupt();
     void clear_interrupt();
 
+    inline bool is_coprocessor_usable(const int idx) const {
+        // Force CP0 to be usable for now
+        if (idx == 0) {
+            return true;
+        }
+
+        return (cp0.status.coprocessor_usable & (1 << idx)) != 0;
+    }
+
     // FPU handlers (control registers, FGRs)
     common::u32 get_fpu_control_reg(const common::u32 idx) const;
     void set_fpu_control_reg(const common::u32 idx, const common::u32 data);
