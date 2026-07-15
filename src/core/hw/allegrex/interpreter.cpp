@@ -411,7 +411,7 @@ static i64 i_ctc(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_cvts(Allegrex* cpu, const u32 instr) {
-    cpu->set_fgr(FD, (f32)cpu->get_fgr_raw(FS));
+    cpu->set_fgr(FD, (f32)(i32)cpu->get_fgr_raw(FS));
     return 1;
 }
 
