@@ -681,6 +681,30 @@ static void start_list_exec() {
                 logger->debug("SHADE");
                 rasterizer::set_gouraud_shading_enable((list_command.param & 1) != 0);
                 break;
+            case GeCommand::GE_COMMAND_MEC:
+            case GeCommand::GE_COMMAND_MAC:
+            case GeCommand::GE_COMMAND_MDC:
+            case GeCommand::GE_COMMAND_MSC: {
+                constexpr char MODEL_COLOR[] = { 'E', 'A', 'D', 'S' };
+
+                const int idx = list_command.command - GeCommand::GE_COMMAND_MEC;
+
+                logger->debug("M{}C: {:06X}", MODEL_COLOR[idx], list_command.param);
+                rasterizer::set_model_color(idx, list_command.param);
+                break;
+            }
+            case GeCommand::GE_COMMAND_MAA:
+                logger->debug("MAA: {:02X}", list_command.param & 0xFF);
+                rasterizer::set_model_alpha(list_command.param & 0xFF);
+                break;
+            case GeCommand::GE_COMMAND_AC:
+                logger->debug("AC: {:06X}", list_command.param);
+                rasterizer::set_ambient_color(list_command.param);
+                break;
+            case GeCommand::GE_COMMAND_AA:
+                logger->debug("AA: {:02X}", list_command.param & 0xFF);
+                rasterizer::set_ambient_alpha(list_command.param & 0xFF);
+                break;
             case GeCommand::GE_COMMAND_FBP:
                 logger->debug("FBP (address: {:06X})", list_command.param);
                 rasterizer::set_framebuffer_base(list_command.param);

@@ -180,6 +180,13 @@ enum BlendFunc {
     BLEND_FUNC_ABS              = 5,
 };
 
+enum ModelColor {
+    MODEL_COLOR_EMISSION = 0,
+    MODEL_COLOR_AMBIENT  = 1,
+    MODEL_COLOR_DIFFUSE  = 2,
+    MODEL_COLOR_SPECULAR = 3,
+};
+
 struct Vertex {
     // For debugging purposes
     u32 addr;
@@ -268,6 +275,25 @@ static struct {
     bool gouraud_shading_enable;
 
     f32 weights[NUM_MORPH_WEIGHTS];
+
+    struct {
+        Color model_colors[4];
+        Color ambient_color;
+
+        bool use_vertex_ambient;
+        bool use_vertex_diffuse;
+        bool use_vertex_specular;
+
+        struct {
+            f32 x, y, z;
+            f32 dx, dy, dz;
+            f32 attenuation_factors[3];
+            f32 convergence_factor;
+            f32 cutoff_coefficient;
+
+            Color colors[3];
+        } light[NUM_LIGHTS];
+    } lighting;
 
     struct {
         u32 u_div, v_div;
@@ -688,6 +714,46 @@ void set_gouraud_shading_enable(const bool enable) {
     logger->debug("Gouraud shading enabled: {}", enable);
 }
 
+void set_model_color(const u32 idx, const u32 data) {
+    constexpr const char* MODEL_COLOR_NAMES[] = {
+        "Emission", "Ambient", "Diffuse", "Specular",
+    };
+
+    assert(idx <= ModelColor::MODEL_COLOR_SPECULAR);
+
+    Color& model_color = ctx.lighting.model_colors[idx];
+
+    model_color.raw &= ~0xFFFFFF;
+    model_color.raw |= data;
+
+    logger->debug("Model {} color: {:08X}", MODEL_COLOR_NAMES[idx], model_color.raw);
+}
+
+void set_model_alpha(const u32 data) {
+    Color& model_color = ctx.lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
+
+    model_color.a = data;
+
+    logger->debug("Model Ambient alpha: {:02X}", model_color.a);
+}
+
+void set_ambient_color(const u32 data) {
+    Color& ambient_color = ctx.lighting.ambient_color;
+
+    ambient_color.raw &= ~0xFFFFFF;
+    ambient_color.raw |= data;
+
+    logger->debug("Global Ambient color: {:08X}", ambient_color.raw);
+}
+
+void set_ambient_alpha(const u32 data) {
+    Color& ambient_color = ctx.lighting.ambient_color;
+
+    ambient_color.a = data;
+
+    logger->debug("Global Ambient alpha: {:02X}", ambient_color.a);
+}
+
 void set_framebuffer_base(const u32 addr_lo) {
     assert((addr_lo & 0x1FFF) == 0);
 
@@ -1019,6 +1085,74 @@ static void screen_transform(std::vector<Vertex>& vertices) {
     }
 }
 
+// Blending/lighting helpers
+
+static inline u8 color_clamp(const int color) {
+    if (color > 255) {
+        return 255;
+    } else if (color < 0) {
+        return 0;
+    }
+
+    return (u8)color;
+}
+
+static inline Color color_add(const Color src_color, const Color dst_color) {
+    return Color {
+        .r = color_clamp(src_color.r + dst_color.r),
+        .g = color_clamp(src_color.g + dst_color.g),
+        .b = color_clamp(src_color.b + dst_color.b),
+        .a = color_clamp(src_color.a + dst_color.a),
+    };
+}
+
+static inline Color color_subtract(const Color src_color, const Color dst_color) {
+    return Color {
+        .r = color_clamp(src_color.r - dst_color.r),
+        .g = color_clamp(src_color.g - dst_color.g),
+        .b = color_clamp(src_color.b - dst_color.b),
+        .a = color_clamp(src_color.a - dst_color.a),
+    };
+}
+
+static inline Color color_multiply(const Color src_color, const Color dst_color) {
+    return Color {
+        .r = (u8)((src_color.r * dst_color.r) / 255),
+        .g = (u8)((src_color.g * dst_color.g) / 255),
+        .b = (u8)((src_color.b * dst_color.b) / 255),
+        .a = (u8)((src_color.a * dst_color.a) / 255),
+    };
+}
+
+static inline u8 color_multiply(const u8 src_color, const u8 dst_color) {
+    return ((int)src_color * (int)dst_color) / 255;
+}
+
+static void calculate_lighting(std::vector<Vertex>& vertices) {
+    auto& lighting = ctx.lighting;
+
+    const bool has_colors = ctx.vertex_type.color_type != ColorType::COLOR_TYPE_NONE;
+
+    for (Vertex& vertex : vertices) {
+        Color final_color, vertex_color{ .r = (u8)vertex.r, .g = (u8)vertex.g, .b = (u8)vertex.b, .a = (u8)vertex.a };
+
+        if (ctx.lighting_enable) {
+            // Set color to model emission color + global ambient
+            final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
+        } else if (!has_colors) {
+            // Use model ambient color if there is no color data
+            final_color = lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
+
+            vertex.has_colors = true;
+        }
+
+        vertex.r = final_color.r;
+        vertex.g = final_color.g;
+        vertex.b = final_color.b;
+        vertex.a = final_color.a;
+    }
+}
+
 static Vertex fetch_vertex(u32 addr) {
     assert(ctx.vertex_type.modcoord_type != ModcoordType::MODCOORD_TYPE_NONE);
 
@@ -1215,6 +1349,9 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool is_rectang
     if (!through_mode && !is_rectangle) {
         // In normal mode, the GE performs a buuuunch of vertex transformations...
         transform_3d(vertices, ge::get_world_matrix());
+
+        calculate_lighting(vertices);
+
         transform_3d(vertices, ge::get_view_matrix());
         transform_4d(vertices, ge::get_perspective_matrix());
         viewport_transform(vertices);
@@ -1454,49 +1591,6 @@ static bool depth_test(const u32 x, const u32 y, const u16 depth) {
     return true;
 }
 
-// Blending helpers
-
-static inline u8 color_clamp(const int color) {
-    if (color > 255) {
-        return 255;
-    } else if (color < 0) {
-        return 0;
-    }
-
-    return (u8)color;
-}
-
-static inline Color color_add(const Color src_color, const Color dst_color) {
-    return Color {
-        .r = color_clamp(src_color.r + dst_color.r),
-        .g = color_clamp(src_color.g + dst_color.g),
-        .b = color_clamp(src_color.b + dst_color.b),
-        .a = color_clamp(src_color.a + dst_color.a),
-    };
-}
-
-static inline Color color_subtract(const Color src_color, const Color dst_color) {
-    return Color {
-        .r = color_clamp(src_color.r - dst_color.r),
-        .g = color_clamp(src_color.g - dst_color.g),
-        .b = color_clamp(src_color.b - dst_color.b),
-        .a = color_clamp(src_color.a - dst_color.a),
-    };
-}
-
-static inline Color color_multiply(const Color src_color, const Color dst_color) {
-    return Color {
-        .r = (u8)((src_color.r * dst_color.r) / 255),
-        .g = (u8)((src_color.g * dst_color.g) / 255),
-        .b = (u8)((src_color.b * dst_color.b) / 255),
-        .a = (u8)((src_color.a * dst_color.a) / 255),
-    };
-}
-
-static inline u8 color_multiply(const u8 src_color, const u8 dst_color) {
-    return ((int)src_color * (int)dst_color) / 255;
-}
-
 constexpr const char* BLEND_INPUT_NAMES[] = {
 
 };
@@ -1585,9 +1679,10 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             exit(1);
     }
 
-    if (!blend_params.use_tex_alpha) {
+    // Something about this is odd, I'll turn it off for now
+    /* if (!blend_params.use_tex_alpha) {
         final_color.a = vertex_color.a;
-    }
+    } */
 
     return final_color;
 }
@@ -1674,26 +1769,21 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
                 Color vertex_color, final_color;
 
-                if (a.has_colors) {
-                    if (ctx.gouraud_shading_enable) {
-                        vertex_color.r = interpolate(w0, w1, w2, a.r, b.r, c.r, area);
-                        vertex_color.g = interpolate(w0, w1, w2, a.g, b.g, c.g, area);
-                        vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
-                        vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
-                    } else {
-                        vertex_color.r = c.r;
-                        vertex_color.g = c.g;
-                        vertex_color.b = c.b;
-                        vertex_color.a = c.a;
-                    }
+                assert(a.has_colors);
+
+                if (ctx.gouraud_shading_enable) {
+                    vertex_color.r = interpolate(w0, w1, w2, a.r, b.r, c.r, area);
+                    vertex_color.g = interpolate(w0, w1, w2, a.g, b.g, c.g, area);
+                    vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
+                    vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
                 } else {
-                    // What do we do here...
-                    vertex_color.raw = 0xFFFFFFFF;
+                    vertex_color.r = c.r;
+                    vertex_color.g = c.g;
+                    vertex_color.b = c.b;
+                    vertex_color.a = c.a;
                 }
 
-                if (ctx.texture_mapping_enable) {
-                    assert(a.has_texcoords);
-
+                if (ctx.texture_mapping_enable && a.has_texcoords) {
                     f32 s, t;
 
                     st_interpolate(w0, w1, w2, a, b, c, &s, &t);
@@ -1721,14 +1811,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
                     const Color tex_color { .raw = tex_sample_bilinear(u, v) };
 
-                    // We need this hack until I know where to pull
-                    // vertex colors from when there are none in the
-                    // vertex data...
-                    if (a.has_colors) {
-                        final_color = blend_texture(vertex_color, tex_color);
-                    } else {
-                        final_color = tex_color;
-                    }
+                    final_color = blend_texture(vertex_color, tex_color);
                 } else {
                     final_color = vertex_color;
                 }
@@ -1823,6 +1906,7 @@ static void draw_bezier_patch(
     // If one control point has texcoords, all of them do. Applies to the
     // vertices we generate, too
     const bool has_texcoords = control_points[0].has_texcoords;
+    const bool has_colors = control_points[0].has_colors;
 
     // Tessellate the patch
     for (u32 v = 0; v <= v_div; v++) {
@@ -1830,6 +1914,7 @@ static void draw_bezier_patch(
             Vertex& vertex = vertices[v * (u_div + 1) + u];
 
             vertex.has_texcoords = has_texcoords;
+            vertex.has_colors = has_colors;
 
             const f32 u_sub = (f32)u / u_div;
             const f32 v_sub = (f32)v / v_div;
@@ -1848,6 +1933,13 @@ static void draw_bezier_patch(
                     if (has_texcoords) {
                         vertex.s += bernstein_u * bernstein_v * control_point.s;
                         vertex.t += bernstein_u * bernstein_v * control_point.t;
+                    }
+
+                    if (has_colors) {
+                        vertex.r += bernstein_u * bernstein_v * control_point.r;
+                        vertex.g += bernstein_u * bernstein_v * control_point.g;
+                        vertex.b += bernstein_u * bernstein_v * control_point.b;
+                        vertex.a += bernstein_u * bernstein_v * control_point.a;
                     }
                 }
             }
@@ -2008,6 +2100,15 @@ static void draw_spline_patch(
                     vertex.x += spline_u * spline_v * control_point.x;
                     vertex.y += spline_u * spline_v * control_point.y;
                     vertex.z += spline_u * spline_v * control_point.z;
+
+                    if (control_point.has_colors) {
+                        vertex.r += spline_u * spline_v * control_point.r;
+                        vertex.g += spline_u * spline_v * control_point.g;
+                        vertex.b += spline_u * spline_v * control_point.b;
+                        vertex.a += spline_u * spline_v * control_point.a;
+
+                        vertex.has_colors = true;
+                    }
                 }
             }
 
