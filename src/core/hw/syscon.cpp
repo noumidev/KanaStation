@@ -38,27 +38,28 @@ constexpr static u8 INITIAL_SCRATCHPAD[SCRATCHPAD_SIZE] = {
 };
 
 enum SysconCommand {
-    SYSCON_COMMAND_GET_BARYON_VERSION      = 0x01,
-    SYSCON_COMMAND_GET_TACHYON_TEMP        = 0x05,
-    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY  = 0x07,
-    SYSCON_COMMAND_READ_CLOCK              = 0x09,
-    SYSCON_COMMAND_READ_ALARM              = 0x0A,
-    SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS = 0x0B,
-    SYSCON_COMMAND_GET_WAKE_UP_FACTOR      = 0x0E,
-    SYSCON_COMMAND_GET_BARYON_TIMESTAMP    = 0x11,
-    SYSCON_COMMAND_WRITE_SCRATCHPAD        = 0x23,
-    SYSCON_COMMAND_READ_SCRATCHPAD         = 0x24,
-    SYSCON_COMMAND_SEND_SETPARAM           = 0x25,
-    SYSCON_COMMAND_CTRL_TACHYON_WDT        = 0x31,
-    SYSCON_COMMAND_RESET_DEVICE            = 0x32,
-    SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING  = 0x33,
-    SYSCON_COMMAND_CTRL_HR_POWER           = 0x34,
-    SYSCON_COMMAND_GET_POMMEL_VERSION      = 0x40,
-    SYSCON_COMMAND_CTRL_VOLTAGE            = 0x42,
-    SYSCON_COMMAND_GET_POWER_STATUS        = 0x46,
-    SYSCON_COMMAND_CTRL_LED                = 0x47,
-    SYSCON_COMMAND_CTRL_LEPTON_POWER       = 0x4B,
-    SYSCON_COMMAND_CTRL_MS_POWER           = 0x4C,
+    SYSCON_COMMAND_GET_BARYON_VERSION            = 0x01,
+    SYSCON_COMMAND_GET_TACHYON_TEMP              = 0x05,
+    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY        = 0x07,
+    SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY_ANALOG = 0x08,
+    SYSCON_COMMAND_READ_CLOCK                    = 0x09,
+    SYSCON_COMMAND_READ_ALARM                    = 0x0A,
+    SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS       = 0x0B,
+    SYSCON_COMMAND_GET_WAKE_UP_FACTOR            = 0x0E,
+    SYSCON_COMMAND_GET_BARYON_TIMESTAMP          = 0x11,
+    SYSCON_COMMAND_WRITE_SCRATCHPAD              = 0x23,
+    SYSCON_COMMAND_READ_SCRATCHPAD               = 0x24,
+    SYSCON_COMMAND_SEND_SETPARAM                 = 0x25,
+    SYSCON_COMMAND_CTRL_TACHYON_WDT              = 0x31,
+    SYSCON_COMMAND_RESET_DEVICE                  = 0x32,
+    SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING        = 0x33,
+    SYSCON_COMMAND_CTRL_HR_POWER                 = 0x34,
+    SYSCON_COMMAND_GET_POMMEL_VERSION            = 0x40,
+    SYSCON_COMMAND_CTRL_VOLTAGE                  = 0x42,
+    SYSCON_COMMAND_GET_POWER_STATUS              = 0x46,
+    SYSCON_COMMAND_CTRL_LED                      = 0x47,
+    SYSCON_COMMAND_CTRL_LEPTON_POWER             = 0x4B,
+    SYSCON_COMMAND_CTRL_MS_POWER                 = 0x4C,
 };
 
 enum BufferIndex {
@@ -165,6 +166,8 @@ static void common_read(const u8 command) {
             data = 13094;
             break;
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
+        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY_ANALOG:
+            // TODO: return analog stick data
             logger->debug("GET_KERNEL_DIGITAL_KEY");
             
             data = kanacore::get_button_state();
@@ -380,6 +383,7 @@ static void start_command() {
             break;
         case SysconCommand::SYSCON_COMMAND_GET_TACHYON_TEMP:
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
+        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY_ANALOG:
         case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
         case SysconCommand::SYSCON_COMMAND_READ_ALARM:
         case SysconCommand::SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS:
