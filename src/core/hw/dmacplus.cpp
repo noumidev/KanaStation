@@ -162,13 +162,31 @@ static void assert_terminal_count_interrupt(const u32 channel, const bool mask) 
     check_pending_interrupts();
 }
 
+static void start_sc128_transfer();
+
 static void end_sc128_transfer(const int) {
-    HW_DMACPLUS_SC128_CONTROL.transfer_length = 0;
-    HW_DMACPLUS_SC128_CONFIG.active = 0;
-    HW_DMACPLUS_SC128_CONFIG.channel_enable = 0;
+    bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
     if (HW_DMACPLUS_SC128_CONTROL.interrupt_enable) {
         assert_terminal_count_interrupt(4, HW_DMACPLUS_SC128_CONFIG.interrupt_mask);
+    }
+
+    if (HW_DMACPLUS_SC128_LINKADDR != 0) {
+        // Scatter/gather
+        const u32 link_addr = HW_DMACPLUS_SC128_LINKADDR;
+
+        HW_DMACPLUS_SC128_SRCADDR  = bus->read<u32>(link_addr + 0x0);
+        HW_DMACPLUS_SC128_DSTADDR  = bus->read<u32>(link_addr + 0x4);
+        HW_DMACPLUS_SC128_LINKADDR = bus->read<u32>(link_addr + 0x8);
+        HW_DMACPLUS_SC128_CONTROL.raw = bus->read<u32>(link_addr + 0xC);
+
+        if (HW_DMACPLUS_SC128_CONTROL.transfer_length > 0) {
+            start_sc128_transfer();
+        }
+    } else {
+        HW_DMACPLUS_SC128_CONTROL.transfer_length = 0;
+        HW_DMACPLUS_SC128_CONFIG.active = 0;
+        HW_DMACPLUS_SC128_CONFIG.channel_enable = 0;
     }
 }
 
@@ -186,8 +204,6 @@ static void start_sc128_transfer() {
 
     // Sanity checks
 
-    // No link?
-    assert(HW_DMACPLUS_SC128_LINKADDR == 0);
     // Memory to memory
     assert(HW_DMACPLUS_SC128_CONFIG.flow_control == 0);
     // Transfer width is 128-bit
