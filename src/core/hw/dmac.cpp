@@ -191,7 +191,7 @@ static void end_transfer(const int chan_idx) {
         HW_DMAC_CHAN_LINKADDR = bus->read<u32>(link_addr + 0x8);
         HW_DMAC_CHAN_CONTROL.raw = bus->read<u32>(link_addr + 0xC);
 
-        if (HW_DMAC_CHAN_CONFIG.channel_enable) {
+        if (HW_DMAC_CHAN_CONTROL.transfer_length > 0) {
             start_transfer<dmac_num>(chan_idx);
         }
     } else {
