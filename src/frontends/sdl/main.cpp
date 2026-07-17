@@ -85,7 +85,12 @@ SDL_AppResult SDL_AppInit(void**, int argc, char** argv) {
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
     // All KanaCore loggers rely on this
+#ifdef NDEBUG
     spdlog::set_level(spdlog::level::debug);
+#else
+    spdlog::set_level(spdlog::level::warn);
+#endif
+
     spdlog::set_pattern("[%n] [%^%l%$] %v");
 
     kanacore::Configuration config = kanacore::parse_args(argc, argv);
