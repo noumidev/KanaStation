@@ -16,4 +16,8 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
+const common::f32* get_world_matrix();
+const common::f32* get_view_matrix();
+const common::f32* get_perspective_matrix();
+
 };

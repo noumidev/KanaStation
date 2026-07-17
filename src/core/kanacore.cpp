@@ -37,6 +37,7 @@
 #include <core/hw/allegrex/scratchpad.hpp>
 #include <core/hw/ge/edram.hpp>
 #include <core/hw/ge/ge.hpp>
+#include <core/hw/ge/rasterizer.hpp>
 #include <core/hw/me/scratchpad.hpp>
 #include <core/hw/me/vme_dmac.hpp>
 #include <core/hw/uart/uart.hpp>
@@ -114,6 +115,7 @@ void initialize(const Configuration config) {
     hw::allegrex::scratchpad::initialize();
     hw::ge::initialize();
     hw::ge::edram::initialize();
+    hw::ge::rasterizer::initialize();
     hw::me::scratchpad::initialize();
     hw::me::vme_dmac::initialize();
     hw::uart::initialize();
@@ -145,6 +147,7 @@ void soft_reset() {
     hw::allegrex::scratchpad::soft_reset();
     hw::ge::soft_reset();
     hw::ge::edram::soft_reset();
+    hw::ge::rasterizer::soft_reset();
     hw::me::scratchpad::soft_reset();
     hw::me::vme_dmac::soft_reset();
     hw::uart::soft_reset();
@@ -177,6 +180,7 @@ void hard_reset() {
     hw::allegrex::scratchpad::hard_reset();
     hw::ge::hard_reset();
     hw::ge::edram::hard_reset();
+    hw::ge::rasterizer::hard_reset();
     hw::me::scratchpad::hard_reset();
     hw::me::vme_dmac::hard_reset();
     hw::uart::hard_reset();
@@ -220,6 +224,7 @@ void shutdown() {
     hw::allegrex::scratchpad::shutdown();
     hw::ge::shutdown();
     hw::ge::edram::shutdown();
+    hw::ge::rasterizer::shutdown();
     hw::me::scratchpad::shutdown();
     hw::me::vme_dmac::shutdown();
     hw::uart::shutdown();

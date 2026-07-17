@@ -54,6 +54,7 @@ set(SOURCES
     src/core/hw/allegrex/scratchpad.cpp
     src/core/hw/ge/edram.cpp
     src/core/hw/ge/ge.cpp
+    src/core/hw/ge/rasterizer.cpp
     src/core/hw/me/scratchpad.cpp
     src/core/hw/me/vme_dmac.cpp
     src/core/hw/uart/uart.cpp
@@ -89,6 +90,7 @@ set(HEADERS
     include/core/hw/allegrex/scratchpad.hpp
     include/core/hw/ge/edram.hpp
     include/core/hw/ge/ge.hpp
+    include/core/hw/ge/rasterizer.hpp
     include/core/hw/me/scratchpad.hpp
     include/core/hw/me/vme_dmac.hpp
     include/core/hw/uart/uart.hpp
