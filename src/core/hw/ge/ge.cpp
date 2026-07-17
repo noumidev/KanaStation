@@ -677,6 +677,10 @@ static void start_list_exec() {
                 logger->debug("OFFSETY");
                 rasterizer::set_offset_y((f32)(u16)list_command.param / 16);
                 break;
+            case GeCommand::GE_COMMAND_SHADE:
+                logger->debug("SHADE");
+                rasterizer::set_gouraud_shading_enable((list_command.param & 1) != 0);
+                break;
             case GeCommand::GE_COMMAND_FBP:
                 logger->debug("FBP (address: {:06X})", list_command.param);
                 rasterizer::set_framebuffer_base(list_command.param);
@@ -760,6 +764,11 @@ static void start_list_exec() {
                 rasterizer::set_texture_size(idx, width, height);
                 break;
             }
+            case GeCommand::GE_COMMAND_TMAP:
+                logger->debug("TMAP");
+
+                assert((list_command.param & 3) != 1);
+                break;
             case GeCommand::GE_COMMAND_TPF:
                 logger->debug("TPF");
                 rasterizer::set_texture_format(list_command.param & 0xF);
@@ -774,6 +783,10 @@ static void start_list_exec() {
             case GeCommand::GE_COMMAND_CLUT:
                 logger->debug("CLUT");
                 rasterizer::set_clut(list_command.param);
+                break;
+            case GeCommand::GE_COMMAND_TFUNC:
+                logger->debug("TFUNC");
+                rasterizer::set_texture_blend_params(list_command.param);
                 break;
             case GeCommand::GE_COMMAND_TFLUSH:
                 logger->debug("TFLUSH");

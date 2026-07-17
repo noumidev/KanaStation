@@ -49,6 +49,7 @@ void set_texture_scale(const common::u32 idx, const common::f32 data);
 void set_texture_offset(const common::u32 idx, const common::f32 data);
 void set_offset_x(const common::f32 data);
 void set_offset_y(const common::f32 data);
+void set_gouraud_shading_enable(const bool enable);
 void set_framebuffer_base(const common::u32 addr_lo);
 void set_framebuffer_width(const common::u32 width);
 void set_depth_buffer_base(const common::u32 addr_lo);
@@ -61,6 +62,7 @@ void set_texture_size(const common::u32 idx, const common::u32 width, const comm
 void set_texture_format(const common::u32 format);
 void load_clut(const common::u32 num_palettes);
 void set_clut(const common::u32 data);
+void set_texture_blend_params(const common::u32 data);
 void set_scissor_upper(const common::u32 data);
 void set_scissor_lower(const common::u32 data);
 void set_minimum_depth(const common::u16 minz);

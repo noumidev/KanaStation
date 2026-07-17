@@ -265,6 +265,7 @@ static struct {
     bool patch_culling_enable;
     bool color_test_enable;
     bool logic_operation_enable;
+    bool gouraud_shading_enable;
 
     f32 weights[NUM_MORPH_WEIGHTS];
 
@@ -334,6 +335,11 @@ static struct {
 
         Color fixa, fixb;
     } blend_params;
+
+    struct {
+        bool use_tex_alpha;
+        u32 func;
+    } tex_blend_params;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -676,6 +682,12 @@ void set_offset_y(const f32 data) {
     logger->debug("Y offset: {}", data);
 }
 
+void set_gouraud_shading_enable(const bool enable) {
+    ctx.gouraud_shading_enable = enable;
+
+    logger->debug("Gouraud shading enabled: {}", enable);
+}
+
 void set_framebuffer_base(const u32 addr_lo) {
     assert((addr_lo & 0x1FFF) == 0);
 
@@ -851,6 +863,13 @@ void set_clut(const u32 data) {
         clut.mask,
         clut.start_addr << 4
     );
+}
+
+void set_texture_blend_params(const u32 data) {
+    auto& blend_params = ctx.tex_blend_params;
+
+    blend_params.func = data & 7;
+    blend_params.use_tex_alpha = (data & 0x80) != 0;
 }
 
 void set_scissor_upper(const u32 data) {
@@ -1474,6 +1493,10 @@ static inline Color color_multiply(const Color src_color, const Color dst_color)
     };
 }
 
+static inline u8 color_multiply(const u8 src_color, const u8 dst_color) {
+    return ((int)src_color * (int)dst_color) / 255;
+}
+
 constexpr const char* BLEND_INPUT_NAMES[] = {
 
 };
@@ -1544,6 +1567,65 @@ static Color blend(const Color color, const u32 x, const u32 y) {
     return final_color;
 }
 
+static Color blend_texture(const Color vertex_color, const Color tex_color) {
+    auto& blend_params = ctx.tex_blend_params;
+
+    Color final_color;
+
+    switch (blend_params.func) {
+        case 0:
+            // Modulate
+            final_color.r = color_multiply(vertex_color.r, tex_color.r);
+            final_color.g = color_multiply(vertex_color.g, tex_color.g);
+            final_color.b = color_multiply(vertex_color.b, tex_color.b);
+            final_color.a = color_multiply(vertex_color.a, tex_color.a);
+            break;
+        default:
+            logger->error("Unimplemented texture function {}", blend_params.func);
+            exit(1);
+    }
+
+    if (!blend_params.use_tex_alpha) {
+        final_color.a = vertex_color.a;
+    }
+
+    return final_color;
+}
+
+static u32 tex_sample_bilinear(const f32 u, const f32 v) {
+    const int x0 = (int)u;
+    const int x1 = std::min(x0 + 1, (int)(ctx.texture[0].width - 1));
+    const int y0 = (int)v;
+    const int y1 = std::min(y0 + 1, (int)(ctx.texture[0].height - 1));
+
+    const f32 dx = u - x0;
+    const f32 dy = v - y0;
+
+    Color colors[6] = {
+        { fetch_texel(x0, y0) }, { fetch_texel(x1, y0) },
+        { fetch_texel(x0, y1) }, { fetch_texel(x1, y1) },
+    };
+
+    // Blend top pixels
+    colors[4].r = color_clamp(colors[0].r * (1.0 - dx) + colors[1].r * dx);
+    colors[4].g = color_clamp(colors[0].g * (1.0 - dx) + colors[1].g * dx);
+    colors[4].b = color_clamp(colors[0].b * (1.0 - dx) + colors[1].b * dx);
+    colors[4].a = color_clamp(colors[0].a * (1.0 - dx) + colors[1].a * dx);
+
+    // Blend bottom pixels
+    colors[5].r = color_clamp(colors[2].r * (1.0 - dx) + colors[3].r * dx);
+    colors[5].g = color_clamp(colors[2].g * (1.0 - dx) + colors[3].g * dx);
+    colors[5].b = color_clamp(colors[2].b * (1.0 - dx) + colors[3].b * dx);
+    colors[5].a = color_clamp(colors[2].a * (1.0 - dx) + colors[3].a * dx);
+
+    return Color {
+        .r = color_clamp(colors[4].r * (1.0 - dy) + colors[5].r * dy),
+        .g = color_clamp(colors[4].g * (1.0 - dy) + colors[5].g * dy),
+        .b = color_clamp(colors[4].b * (1.0 - dy) + colors[5].b * dy),
+        .a = color_clamp(colors[4].a * (1.0 - dy) + colors[5].a * dy),
+    }.raw;
+}
+
 static void draw_triangle(Vertex a, Vertex b, Vertex c) {
     logger->trace(
         "Triangle ({}, {}, {}), ({}, {}, {}), ({}, {}, {})",
@@ -1590,7 +1672,24 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     continue;
                 }
 
-                Color color;
+                Color vertex_color, final_color;
+
+                if (a.has_colors) {
+                    if (ctx.gouraud_shading_enable) {
+                        vertex_color.r = interpolate(w0, w1, w2, a.r, b.r, c.r, area);
+                        vertex_color.g = interpolate(w0, w1, w2, a.g, b.g, c.g, area);
+                        vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
+                        vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
+                    } else {
+                        vertex_color.r = c.r;
+                        vertex_color.g = c.g;
+                        vertex_color.b = c.b;
+                        vertex_color.a = c.a;
+                    }
+                } else {
+                    // What do we do here...
+                    vertex_color.raw = 0xFFFFFFFF;
+                }
 
                 if (ctx.texture_mapping_enable) {
                     assert(a.has_texcoords);
@@ -1602,6 +1701,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     s = s * ctx.texture_scale[0] + ctx.texture_offset[0];
                     t = t * ctx.texture_scale[1] + ctx.texture_offset[1];
 
+                    // TODO: implement wrapping
                     // Clamp S
                     if (s < 0.0) {
                         s = 0.0;
@@ -1616,22 +1716,30 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                         t = 1.0;
                     }
 
-                    const u32 u = s * (ctx.texture[0].width  - 1);
-                    const u32 v = t * (ctx.texture[0].height - 1);
+                    const f32 u = s * (ctx.texture[0].width  - 1);
+                    const f32 v = t * (ctx.texture[0].height - 1);
 
-                    color.raw = fetch_texel(u, v);
+                    const Color tex_color { .raw = tex_sample_bilinear(u, v) };
+
+                    // We need this hack until I know where to pull
+                    // vertex colors from when there are none in the
+                    // vertex data...
+                    if (a.has_colors) {
+                        final_color = blend_texture(vertex_color, tex_color);
+                    } else {
+                        final_color = tex_color;
+                    }
                 } else {
-                    // TODO: implement vertex colors
-                    color.raw = 0xFFFFFF;
+                    final_color = vertex_color;
                 }
 
-                if (!alpha_test(color.a)) {
+                if (!alpha_test(final_color.a)) {
                     continue;
                 }
 
-                color = blend(color, x, y);
+                final_color = blend(final_color, x, y);
 
-                write_framebuffer(p.x, p.y, color.raw);
+                write_framebuffer(p.x, p.y, final_color.raw);
                 write_depth_buffer(p.x, p.y, z);
             }
         }
