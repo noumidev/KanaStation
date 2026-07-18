@@ -257,16 +257,10 @@ static struct {
 
     // A lot of these don't do anything yet, but they give me some
     // insight as to why graphics look the way they look
-    bool lighting_enable;
-    bool light_enable[NUM_LIGHTS];
     bool clipping_enable;
     bool backface_culling_enable;
     bool texture_mapping_enable;
     bool fogging_enable;
-    bool dithering_enable;
-    bool alpha_blending_enable;
-    bool alpha_test_enable;
-    bool depth_test_enable;
     bool stencil_test_enable;
     bool antialiasing_enable;
     bool patch_culling_enable;
@@ -277,6 +271,7 @@ static struct {
     f32 weights[NUM_MORPH_WEIGHTS];
 
     struct {
+        bool enable;
         Color model_colors[4];
         Color ambient_color;
 
@@ -285,6 +280,7 @@ static struct {
         bool use_vertex_specular;
 
         struct {
+            bool enable;
             f32 x, y, z;
             f32 dx, dy, dz;
             f32 attenuation_factors[3];
@@ -345,16 +341,19 @@ static struct {
 
     // Pixel tests and parameters
     struct {
+        bool enable;
         Test test;
 
         u32 ref, mask;
     } alpha_test;
 
-    Test depth_test;
-
-    u32 alpha_test_reference, alpha_test_mask;
+    struct {
+        bool enable;
+        Test test;
+    } depth_test;
 
     struct {
+        bool enable;
         u32 src_input;
         u32 dst_input;
         u32 func;
@@ -368,6 +367,7 @@ static struct {
     } tex_blend_params;
 
     struct {
+        bool enable;
         int matrix[4][4];
     } dithering;
 } ctx;
@@ -546,7 +546,7 @@ void set_region_lower(const u32 data) {
 }
 
 void set_lighting_enable(const bool enable) {
-    ctx.lighting_enable = enable;
+    ctx.lighting.enable = enable;
 
     logger->debug("Lighting enabled: {}", enable);
 }
@@ -554,7 +554,7 @@ void set_lighting_enable(const bool enable) {
 void set_light_enable(const u32 idx, const bool enable) {
     assert(idx < NUM_LIGHTS);
 
-    ctx.light_enable[idx] = enable;
+    ctx.lighting.light[idx].enable = enable;
 
     logger->debug("Light {} enabled: {}", idx, enable);
 }
@@ -584,25 +584,25 @@ void set_fogging_enable(const bool enable) {
 }
 
 void set_dithering_enable(const bool enable) {
-    ctx.dithering_enable = enable;
+    ctx.dithering.enable = enable;
 
     logger->debug("Dithering enabled: {}", enable);
 }
 
 void set_alpha_blending_enable(const bool enable) {
-    ctx.alpha_blending_enable = enable;
+    ctx.blend_params.enable = enable;
 
     logger->debug("Alpha blending enabled: {}", enable);
 }
 
 void set_alpha_test_enable(const bool enable) {
-    ctx.alpha_test_enable = enable;
+    ctx.alpha_test.enable = enable;
 
     logger->debug("Alpha test enabled: {}", enable);
 }
 
 void set_depth_test_enable(const bool enable) {
-    ctx.depth_test_enable = enable;
+    ctx.depth_test.enable = enable;
 
     logger->debug("Depth test enabled: {}", enable);
 }
@@ -989,7 +989,7 @@ void set_alpha_test(const u32 data) {
 void set_depth_test(const u32 data) {
     assert(data < 8);
 
-    ctx.depth_test = (Test)data;
+    ctx.depth_test.test = (Test)data;
 }
 
 void set_blend_params(const u32 data) {
@@ -1155,7 +1155,7 @@ static void calculate_lighting(std::vector<Vertex>& vertices) {
     for (Vertex& vertex : vertices) {
         Color final_color, vertex_color{ .r = (u8)vertex.r, .g = (u8)vertex.g, .b = (u8)vertex.b, .a = (u8)vertex.a };
 
-        if (ctx.lighting_enable) {
+        if (lighting.enable) {
             // Set color to model emission color + global ambient
             final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
         } else if (!has_colors) {
@@ -1542,7 +1542,7 @@ static bool depth_range_test(const u16 depth) {
 static bool alpha_test(u32 alpha) {
     auto& alpha_test = ctx.alpha_test;
 
-    if (ctx.alpha_test_enable) {
+    if (alpha_test.enable) {
         const u32 ref = alpha_test.ref & alpha_test.mask;
 
         alpha &= alpha_test.mask;
@@ -1571,12 +1571,14 @@ static bool alpha_test(u32 alpha) {
 }
 
 static bool depth_test(const u32 x, const u32 y, const u16 depth) {
-    if (ctx.depth_test_enable) {
+    auto& depth_test = ctx.depth_test;
+
+    if (depth_test.enable) {
         const u16 old_depth = read_depth_buffer(x, y);
 
         bool test_passed;
 
-        switch (ctx.depth_test) {
+        switch (depth_test.test) {
             case Test::TEST_NEVER:
                 // Always fails
                 return false;
@@ -1623,11 +1625,11 @@ constexpr const char* BLEND_INPUT_NAMES[] = {
 };
 
 static Color blend(const Color color, const u32 x, const u32 y) {
-    if (!ctx.alpha_blending_enable) {
+    auto& blend_params = ctx.blend_params;
+
+    if (!blend_params.enable) {
         return color;
     }
-
-    auto& blend_params = ctx.blend_params;
 
     const Color src_color = color;
     const Color dst_color = Color{ .raw = read_framebuffer(x, y) };
@@ -1849,7 +1851,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
                 final_color = blend(final_color, x, y);
 
-                if (ctx.dithering_enable) {
+                if (ctx.dithering.enable) {
                     const int dither_coeff = ctx.dithering.matrix[y & 3][x & 3];
 
                     final_color.r = color_add(final_color.r, dither_coeff);
