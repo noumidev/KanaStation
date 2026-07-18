@@ -854,6 +854,16 @@ static void start_list_exec() {
                 logger->debug("FIXB");
                 rasterizer::set_fixed_color_b(list_command.param);
                 break;
+            case GeCommand::GE_COMMAND_DITH1:
+            case GeCommand::GE_COMMAND_DITH2:
+            case GeCommand::GE_COMMAND_DITH3:
+            case GeCommand::GE_COMMAND_DITH4: {
+                const int idx = list_command.command - GeCommand::GE_COMMAND_DITH1;
+
+                logger->debug("DITH{}", idx + 1);
+                rasterizer::set_dither_matrix(idx, list_command.param);
+                break;
+            }
             case GeCommand::GE_COMMAND_PMSK1:
                 logger->debug("PMSK1");
                 rasterizer::set_color_mask(list_command.param);

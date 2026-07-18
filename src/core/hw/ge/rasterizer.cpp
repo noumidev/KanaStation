@@ -366,6 +366,10 @@ static struct {
         bool use_tex_alpha;
         u32 func;
     } tex_blend_params;
+
+    struct {
+        int matrix[4][4];
+    } dithering;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -1014,6 +1018,17 @@ void set_fixed_color_b(const u32 data) {
     fixb.a = 0xFF;
 }
 
+void set_dither_matrix(const u32 idx, const u32 data) {
+    assert(idx < 4);
+
+    auto& matrix = ctx.dithering.matrix;
+
+    matrix[0][idx] = ((int)data << 28) >> 28;
+    matrix[1][idx] = ((int)data << 24) >> 28;
+    matrix[2][idx] = ((int)data << 20) >> 28;
+    matrix[3][idx] = ((int)data << 16) >> 28;
+}
+
 void set_color_mask(const u32 data) {
     assert(data == 0);
 
@@ -1106,6 +1121,10 @@ static inline Color color_add(const Color src_color, const Color dst_color) {
     };
 }
 
+static inline u8 color_add(const int src_color, const int dst_color) {
+    return color_clamp(src_color + dst_color);
+}
+
 static inline Color color_subtract(const Color src_color, const Color dst_color) {
     return Color {
         .r = color_clamp(src_color.r - dst_color.r),
@@ -1124,8 +1143,8 @@ static inline Color color_multiply(const Color src_color, const Color dst_color)
     };
 }
 
-static inline u8 color_multiply(const u8 src_color, const u8 dst_color) {
-    return ((int)src_color * (int)dst_color) / 255;
+static inline u8 color_multiply(const int src_color, const int dst_color) {
+    return (src_color * dst_color) / 255;
 }
 
 static void calculate_lighting(std::vector<Vertex>& vertices) {
@@ -1829,6 +1848,14 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                 }
 
                 final_color = blend(final_color, x, y);
+
+                if (ctx.dithering_enable) {
+                    const int dither_coeff = ctx.dithering.matrix[y & 3][x & 3];
+
+                    final_color.r = color_add(final_color.r, dither_coeff);
+                    final_color.g = color_add(final_color.g, dither_coeff);
+                    final_color.b = color_add(final_color.b, dither_coeff);
+                }
 
                 write_framebuffer(p.x, p.y, final_color.raw);
                 write_depth_buffer(p.x, p.y, z);

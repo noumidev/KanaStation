@@ -76,6 +76,7 @@ void set_depth_test(const common::u32 data);
 void set_blend_params(const common::u32 data);
 void set_fixed_color_a(const common::u32 data);
 void set_fixed_color_b(const common::u32 data);
+void set_dither_matrix(const common::u32 idx, const common::u32 data);
 void set_color_mask(const common::u32 data);
 void set_alpha_mask(const common::u32 data);
 
