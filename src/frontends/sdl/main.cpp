@@ -56,14 +56,20 @@ SDL_AppResult SDL_AppInit(void**, int argc, char** argv) {
     if (
         !SDL_CreateWindowAndRenderer(
             "KanaStation",
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
+            2 * SCREEN_WIDTH,
+            2 * SCREEN_HEIGHT,
             0,
             &screen.window,
             &screen.renderer
         )
     ) {
         SDL_Log("Failed to create window and renderer: %s", SDL_GetError());
+
+        return SDL_APP_FAILURE;
+    }
+
+    if (!SDL_SetRenderLogicalPresentation(screen.renderer, 2 * SCREEN_WIDTH, 2 * SCREEN_HEIGHT, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE)) {
+        SDL_Log("Failed to set logical presentation: %s", SDL_GetError());
 
         return SDL_APP_FAILURE;
     }
