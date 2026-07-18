@@ -1260,13 +1260,33 @@ static Vertex fetch_vertex(u32 addr) {
     return vertex;
 }
 
-static std::vector<Vertex> fetch_vertices(const u32 count, const bool is_rectangle = false) {
+
+static void transform_and_lighting(std::vector<Vertex>& vertices, const bool is_rectangle = false) {
+    const bool through_mode = ctx.vertex_type.through_mode;
+
+    // Rectangles always use display coordinates, so they do not experience this
+    if (!through_mode && !is_rectangle) {
+        // In normal mode, the GE performs a buuuunch of vertex transformations...
+        transform_3d(vertices, ge::get_world_matrix());
+
+        calculate_lighting(vertices);
+
+        transform_3d(vertices, ge::get_view_matrix());
+        transform_4d(vertices, ge::get_perspective_matrix());
+        viewport_transform(vertices);
+    }
+
+    if (!is_rectangle) {
+        screen_transform(vertices);
+    }
+}
+
+static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_enable = false, const bool is_rectangle = false) {
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
     std::vector<Vertex> vertices(count);
 
-    const bool through_mode = ctx.vertex_type.through_mode;
-    const bool morph_enable = !through_mode && (ctx.vertex_type.num_morph > 0);
+    const bool morph_enable = !ctx.vertex_type.through_mode && (ctx.vertex_type.num_morph > 0);
 
     // Input vertices per output vertex
     const u32 num_vertices = !morph_enable ? 1 : (ctx.vertex_type.num_morph + 1);
@@ -1345,20 +1365,8 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool is_rectang
         logger->trace("X: {}, Y: {}, Z: {}", vertex.x, vertex.y, vertex.z);
     }
 
-    // Rectangles always use display coordinates, so they do not experience this
-    if (!through_mode && !is_rectangle) {
-        // In normal mode, the GE performs a buuuunch of vertex transformations...
-        transform_3d(vertices, ge::get_world_matrix());
-
-        calculate_lighting(vertices);
-
-        transform_3d(vertices, ge::get_view_matrix());
-        transform_4d(vertices, ge::get_perspective_matrix());
-        viewport_transform(vertices);
-    }
-
-    if (!is_rectangle) {
-        screen_transform(vertices);
+    if (transform_enable) {
+        transform_and_lighting(vertices, is_rectangle);
     }
 
     return vertices;
@@ -1838,7 +1846,7 @@ void draw_primitive(const u32 count, const u32 prim_type) {
 
     const bool is_rectangle = prim_type == PrimType::PRIM_TYPE_RECTANGLE;
 
-    const std::vector<Vertex> vertices = fetch_vertices(count, is_rectangle);
+    const std::vector<Vertex> vertices = fetch_vertices(count, true, is_rectangle);
 
     switch (prim_type) {
         case PrimType::PRIM_TYPE_TRIANGLE_STRIP: {
@@ -1947,6 +1955,10 @@ static void draw_bezier_patch(
             logger->trace("Patch vertex (X: {}, Y: {}, Z: {})", vertex.x, vertex.y, vertex.z);
         }
     }
+
+    // Now we can apply T&L, otherwise we might not have any surface normals
+    // for lighting
+    transform_and_lighting(vertices, false);
 
     // Draw the patch mesh
     for (u32 v = 0; v < v_div; v++) {
@@ -2115,6 +2127,11 @@ static void draw_spline_patch(
             logger->trace("Patch vertex (X: {}, Y: {}, Z: {})", vertex.x, vertex.y, vertex.z);
         }
     }
+
+
+    // Now we can apply T&L, otherwise we might not have any surface normals
+    // for lighting
+    transform_and_lighting(vertices, false);
 
     // Draw the patch mesh
     for (u32 v = 0; v < v_div; v++) {
