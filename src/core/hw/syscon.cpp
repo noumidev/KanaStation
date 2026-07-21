@@ -47,6 +47,8 @@ enum SysconCommand {
     SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS       = 0x0B,
     SYSCON_COMMAND_GET_WAKE_UP_FACTOR            = 0x0E,
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP          = 0x11,
+    SYSCON_COMMAND_WRITE_CLOCK                   = 0x20,
+    SYSCON_COMMAND_WRITE_ALARM                   = 0x22,
     SYSCON_COMMAND_WRITE_SCRATCHPAD              = 0x23,
     SYSCON_COMMAND_READ_SCRATCHPAD               = 0x24,
     SYSCON_COMMAND_SEND_SETPARAM                 = 0x25,
@@ -245,6 +247,12 @@ static void common_write(const u8 command) {
     }
 
     switch (command) {
+        case SysconCommand::SYSCON_COMMAND_WRITE_CLOCK:
+            logger->debug("WRITE_CLOCK: {}", data);
+            break;
+        case SysconCommand::SYSCON_COMMAND_WRITE_ALARM:
+            logger->debug("WRITE_ALARM: {}", data);
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
             logger->debug("CTRL_TACHYON_WDT: {}", data);
             break;
@@ -372,6 +380,8 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_CTRL_HR_POWER:
             command_ctrl_hr_power();
             break;
+        case SysconCommand::SYSCON_COMMAND_WRITE_CLOCK:
+        case SysconCommand::SYSCON_COMMAND_WRITE_ALARM:
         case SysconCommand::SYSCON_COMMAND_CTRL_TACHYON_WDT:
         case SysconCommand::SYSCON_COMMAND_RESET_DEVICE:
         case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
