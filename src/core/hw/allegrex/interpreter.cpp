@@ -601,7 +601,7 @@ static i64 i_lwr(Allegrex* cpu, const u32 instr) {
     const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
     const u32 shift = 8 * (addr & 3);
 
-    cpu->set_reg(RT, (cpu->get_reg(RT) & ~(0xFFFFFF00U << (24 - shift))) | (cpu->read<u32>(addr & ~3) >> shift));
+    cpu->set_reg(RT, (cpu->get_reg(RT) & ~(0xFFFFFFFFU >> shift)) | (cpu->read<u32>(addr & ~3) >> shift));
     return 1;
 }
 
