@@ -32,6 +32,11 @@
 #include <core/hw/intc.hpp>
 #include <core/hw/sysctrl.hpp>
 
+/* 
+ * Implementation loosely based on https://github.com/uofw/uofw/blob/master/src/kirk/kirk-rom.c
+ * Thanks!
+ */
+
 namespace kanacore::hw::kirk {
 
 using namespace common;
@@ -196,12 +201,14 @@ enum IoAddress {
 #define HW_KIRK_DSTADDR ctx.destination_addr
 
 enum KirkCommand {
-    KIRK_COMMAND_DECRYPT_PRIVATE = 0x01,
-    KIRK_COMMAND_DECRYPT_STATIC  = 0x07,
-    KIRK_COMMAND_HASH            = 0x0B,
-    KIRK_COMMAND_PRNG            = 0x0E,
-    KIRK_COMMAND_SEED            = 0x0F,
-    KIRK_COMMAND_CERTVRY         = 0x12,
+    KIRK_COMMAND_DECRYPT_PRIVATE    = 0x01,
+    KIRK_COMMAND_DECRYPT_STATIC     = 0x07,
+    KIRK_COMMAND_DECRYPT_PERCONSOLE = 0x08,
+    KIRK_COMMAND_HASH               = 0x0B,
+    KIRK_COMMAND_PRNG               = 0x0E,
+    KIRK_COMMAND_SEED               = 0x0F,
+    KIRK_COMMAND_SIGVRY             = 0x11,
+    KIRK_COMMAND_CERTVRY            = 0x12,
 };
 
 enum AuthMode {
@@ -214,11 +221,18 @@ enum KirkResult {
     KIRK_RESULT_INVALID_MODE        = 0x02,
     KIRK_RESULT_INVALID_HEADER_SIG  = 0x03,
     KIRK_RESULT_INVALID_DATA_SIG    = 0x04,
+    KIRK_RESULT_INVALID_ECDSA_DATA  = 0x05,
     KIRK_RESULT_INVALID_DEC_KEYSEED = 0x0F,
     KIRK_RESULT_INVALID_DATA_SIZE   = 0x10,
 };
 
 static std::shared_ptr<spdlog::logger> logger;
+
+// Per-console key mesh
+static struct {
+    u8 derivation_seeds[2][AES_KEY_SIZE];
+    u8 derivation_key[AES_KEY_SIZE];
+} key_mesh;
 
 static struct {
     // KIRK phase register
@@ -316,6 +330,60 @@ static void aes_decrypt(const u8* key, u8* data, const u32 size) {
     };
 
     CBC_Mode<AES>::Decryption(key, AES_KEY_SIZE, AES_ZERO_IV).ProcessData(data, data, size);
+}
+
+static void generate_key_mesh() {
+    // https://www.psdevwiki.com/psp/Kirk#PSP_Individual_Key_Mesh
+
+    constexpr u8 IDS_MASTER_KEY[AES_KEY_SIZE] = {
+        0x47, 0x5E, 0x09, 0xF4, 0xA2, 0x37, 0xDA, 0x9B,
+        0xEF, 0xFF, 0x3B, 0xC0, 0x77, 0x14, 0x3D, 0x8A,
+    };
+
+    u8 subkeys[2][AES_KEY_SIZE];
+
+    const u64 fuse_id = byteswap<u64>(sysctrl::get_fuseid());
+
+    for (u64 i = 0; i < AES_KEY_SIZE; i++) {
+        subkeys[0][i] = subkeys[1][i] = fuse_id >> (8 * (i & 7));
+    }
+
+    for (int i = 0; i < 3; i++) {
+        aes_encrypt(IDS_MASTER_KEY, &subkeys[1][0], AES_KEY_SIZE);
+        aes_decrypt(IDS_MASTER_KEY, &subkeys[0][0], AES_KEY_SIZE);
+    }
+
+    for (int i = 0; i < 3; i++) {
+        for (int k = 0; k < 3; k++) {
+            aes_encrypt(&subkeys[1][0], &subkeys[0][0], AES_KEY_SIZE);
+        }
+
+        u8* derivation_key;
+
+        switch (i) {
+            case 0:
+                derivation_key = &key_mesh.derivation_seeds[0][0];
+                break;
+            case 1:
+                derivation_key = &key_mesh.derivation_seeds[1][0];
+                break;
+            case 2:
+                derivation_key = key_mesh.derivation_key;
+                break;
+        }
+
+        std::memcpy(derivation_key, &subkeys[0][0], AES_KEY_SIZE);
+    }
+}
+
+static void get_individual_key(const int seed, u8* key) {
+    std::memcpy(key, key_mesh.derivation_seeds[seed & 1], AES_KEY_SIZE);
+
+    const int num_rounds = (seed / 2) + 1;
+
+    for (int i = 0; i < num_rounds; i++) {
+        aes_encrypt(key_mesh.derivation_key, key, AES_KEY_SIZE);
+    }
 }
 
 static bool cmac_verify(const u8* key, u8* data, const u32 size, const u8* expected_hash) {
@@ -560,6 +628,48 @@ static i32 command_decrypt_static() {
     return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
+static i32 command_decrypt_perconsole() {
+    logger->debug("DECRYPT_PERCONSOLE");
+
+    // TODO: use named constants
+
+    u32 mode;
+    u32 submode;
+
+    dma_read(HW_KIRK_SRCADDR + 0x00, (u8*)&mode, sizeof(mode));
+    dma_read(HW_KIRK_SRCADDR + 0x0C, (u8*)&submode, sizeof(submode));
+
+    if ((mode != 5) || ((submode >> 8) != 1)) {
+        logger->warn("Invalid mode {:08X} {:06X}", mode, submode >> 8);
+        return KirkResult::KIRK_RESULT_INVALID_MODE;
+    }
+
+    u32 body_size;
+
+    dma_read(HW_KIRK_SRCADDR + 0x10, (u8*)&body_size, sizeof(body_size));
+
+    if (body_size == 0) {
+        logger->warn("Body size is 0");
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
+
+    u8 key[AES_KEY_SIZE];
+
+    get_individual_key(1, key);
+
+    body_size = align_up(body_size);
+
+    std::vector<u8> buf(body_size);
+
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
+    aes_decrypt(key, buf.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
+
+    HW_KIRK_STATUS.needs_second_phase = false;
+
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
 static i32 command_hash() {
     logger->debug("HASH");
 
@@ -625,9 +735,30 @@ static i32 command_seed() {
     return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
+static i32 command_sigvry() {
+    logger->debug("SIGVRY");
+    // TODO
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
 static i32 command_certvry() {
     logger->debug("CERTVRY");
-    return KirkResult::KIRK_RESULT_SUCCESS;
+
+    u8 key[AES_KEY_SIZE];
+
+    get_individual_key(4, key);
+
+    u8 buf[0xA8];
+    u8 cmac_hash[AES_KEY_SIZE];
+
+    dma_read(HW_KIRK_SRCADDR + 0x00, buf, sizeof(buf));
+    dma_read(HW_KIRK_SRCADDR + 0xA8, cmac_hash, sizeof(cmac_hash));
+
+    if (cmac_verify(key, buf, sizeof(buf), cmac_hash)) {
+        return KirkResult::KIRK_RESULT_SUCCESS;
+    } else {
+        return KirkResult::KIRK_RESULT_INVALID_ECDSA_DATA;
+    }
 }
 
 static void end_first_phase(const int result) {
@@ -651,6 +782,9 @@ static void start_first_phase() {
         case KirkCommand::KIRK_COMMAND_DECRYPT_STATIC:
             result = command_decrypt_static();
             break;
+        case KirkCommand::KIRK_COMMAND_DECRYPT_PERCONSOLE:
+            result = command_decrypt_perconsole();
+            break;
         case KirkCommand::KIRK_COMMAND_HASH:
             result = command_hash();
             break;
@@ -659,6 +793,9 @@ static void start_first_phase() {
             break;
         case KirkCommand::KIRK_COMMAND_SEED:
             result = command_seed();
+            break;
+        case KirkCommand::KIRK_COMMAND_SIGVRY:
+            result = command_sigvry();
             break;
         case KirkCommand::KIRK_COMMAND_CERTVRY:
             result = command_certvry();
@@ -750,6 +887,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("KIRK");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    generate_key_mesh();
 }
 
 void soft_reset() {
