@@ -199,6 +199,7 @@ enum KirkCommand {
     KIRK_COMMAND_DECRYPT_PRIVATE = 0x01,
     KIRK_COMMAND_DECRYPT_STATIC  = 0x07,
     KIRK_COMMAND_HASH            = 0x0B,
+    KIRK_COMMAND_PRNG            = 0x0E,
     KIRK_COMMAND_SEED            = 0x0F,
     KIRK_COMMAND_CERTVRY         = 0x12,
 };
@@ -583,6 +584,21 @@ static i32 command_hash() {
     return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
+static i32 command_prng() {
+    constexpr u64 OUTPUT_SIZE = 0x14;
+
+    u8 buf[OUTPUT_SIZE] = {};
+
+    logger->debug("PRNG");
+
+    // This command would generate an ECDSA private key for use as random data
+    dma_write(HW_KIRK_DSTADDR, buf, OUTPUT_SIZE);
+
+    HW_KIRK_STATUS.needs_second_phase = false;
+
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
 static void increment_counter(u8* buf) {
     u64 counter;
 
@@ -637,6 +653,9 @@ static void start_first_phase() {
             break;
         case KirkCommand::KIRK_COMMAND_HASH:
             result = command_hash();
+            break;
+        case KirkCommand::KIRK_COMMAND_PRNG:
+            result = command_prng();
             break;
         case KirkCommand::KIRK_COMMAND_SEED:
             result = command_seed();
