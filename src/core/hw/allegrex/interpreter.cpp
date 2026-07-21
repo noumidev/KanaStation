@@ -59,6 +59,7 @@ enum Opcode {
     OPCODE_LUI      = 0x0F,
     OPCODE_COP0     = 0x10,
     OPCODE_COP1     = 0x11,
+    OPCODE_COP2     = 0x12,
     OPCODE_BEQL     = 0x14,
     OPCODE_BNEL     = 0x15,
     OPCODE_BLEZL    = 0x16,
@@ -80,6 +81,8 @@ enum Opcode {
     OPCODE_CACHE    = 0x2F,
     OPCODE_LWC1     = 0x31,
     OPCODE_SWC1     = 0x39,
+    OPCODE_VFPU6    = 0x3C,
+    OPCODE_VFPU7    = 0x3F,
 };
 
 enum SpecialOpcode {
@@ -104,6 +107,7 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_MULTU   = 0x19,
     SPECIAL_OPCODE_DIV     = 0x1A,
     SPECIAL_OPCODE_DIVU    = 0x1B,
+    SPECIAL_OPCODE_MADD    = 0x1C,
     SPECIAL_OPCODE_ADD     = 0x20,
     SPECIAL_OPCODE_ADDU    = 0x21,
     SPECIAL_OPCODE_SUB     = 0x22,
@@ -605,6 +609,15 @@ static i64 i_lwr(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_madd(Allegrex* cpu, const u32 instr) {
+    const i64 acc = ((u64)cpu->get_reg(33) << 32) | cpu->get_reg(32);
+    const u64 result = acc + (i64)(i32)cpu->get_reg(RS) * (i64)(i32)cpu->get_reg(RT);
+
+    cpu->set_reg(32, (u32)result);
+    cpu->set_reg(33, (u32)(result >> 32));
+    return 1; // Not correct
+}
+
 static i64 i_max(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, std::max((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
     return 1;
@@ -914,6 +927,13 @@ template<int cop_num>
 static i64 i_cop(Allegrex* cpu, const u32 instr) {
     assert(cpu->is_coprocessor_usable(cop_num));
 
+    if constexpr (cop_num == 2) {
+        assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+        cpu->get_logger()->warn("Unimplemented COP2 instruction ({:08X})", instr);
+        return 1;
+    }
+
     switch (RS) {
         case CopOpcode::COP_OPCODE_MFC:
             return i_mfc<cop_num>(cpu, instr);
@@ -1067,6 +1087,20 @@ static i64 i_special3(Allegrex* cpu, const u32 instr) {
     }
 }
 
+static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    cpu->get_logger()->warn("Unimplemented VFPU6 instruction ({:08X})", instr);
+    return 1;
+}
+
+static i64 i_vfpu7(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    cpu->get_logger()->warn("Unimplemented VFPU7 instruction ({:08X})", instr);
+    return 1;
+}
+
 // Dummy instruction handler
 static i64 i_undefined(Allegrex* cpu, const u32 instr) {
     cpu->get_logger()->error("Undefined primary instruction {:02X} ({:08X}) @ {:08X}", OPCODE, instr, cpu->get_instr_addr());
@@ -1103,6 +1137,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_LUI     ] = i_lui;
     primary_table[Opcode::OPCODE_COP0    ] = i_cop<0>;
     primary_table[Opcode::OPCODE_COP1    ] = i_cop<1>;
+    primary_table[Opcode::OPCODE_COP2    ] = i_cop<2>;
     primary_table[Opcode::OPCODE_BEQL    ] = i_beql;
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
@@ -1124,6 +1159,8 @@ void initialize() {
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
     primary_table[Opcode::OPCODE_LWC1    ] = i_lwc1;
     primary_table[Opcode::OPCODE_SWC1    ] = i_swc1;
+    primary_table[Opcode::OPCODE_VFPU6   ] = i_vfpu6;
+    primary_table[Opcode::OPCODE_VFPU7   ] = i_vfpu7;
 
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLL    ] = i_sll;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SRL    ] = i_shift_right;
@@ -1146,6 +1183,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_MULTU  ] = i_multu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_DIV    ] = i_div;
     special_table[SpecialOpcode::SPECIAL_OPCODE_DIVU   ] = i_divu;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MADD   ] = i_madd;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADD    ] = i_addu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_ADDU   ] = i_addu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SUB    ] = i_subu;
