@@ -176,6 +176,7 @@ private:
 
     bool delay_slot_pending;
     bool in_delay_slot;
+    bool load_linked;
 
     bus::Bus bus;
 
@@ -231,8 +232,8 @@ public:
 
     void dump_state();
 
-    void jump(const common::u32 target);
-    void delayed_jump(const common::u32 target);
+    void jump(common::u32 target);
+    void delayed_jump(common::u32 target);
 
     template<bool is_branch_likely>
     void branch(const common::u32 target, const bool condition, const common::u32 link_idx);
@@ -260,6 +261,14 @@ public:
     void wait_for_interrupt();
     void assert_interrupt();
     void clear_interrupt();
+
+    inline bool is_load_linked() const {
+        return load_linked;
+    }
+
+    inline void set_load_linked(const bool is_load_linked) {
+        load_linked = is_load_linked;
+    }
 
     inline bool is_coprocessor_usable(const int idx) const {
         // Force CP0 to be usable for now

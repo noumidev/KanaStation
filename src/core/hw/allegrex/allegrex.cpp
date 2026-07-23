@@ -136,8 +136,13 @@ void Allegrex::dump_state() {
     }
 }
 
-void Allegrex::jump(const u32 target) {
+void Allegrex::jump(u32 target) {
     if constexpr (!SILENT_JUMPS) logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
+
+    // ALLEGREX doesn't actually seem to throw exceptions on unaligned accesses.
+    // The firmware deliberately sets the KIRK interrupt handler to an unaligned
+    // address, so let's just align PC
+    target &= ~3;
 
     regfile.pc = target;
     regfile.next_pc = target + sizeof(u32);
@@ -145,8 +150,11 @@ void Allegrex::jump(const u32 target) {
     clear_delay_slot();
 }
 
-void Allegrex::delayed_jump(const u32 target) {
+void Allegrex::delayed_jump( u32 target) {
     if constexpr (!SILENT_JUMPS) logger->debug("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
+
+    // See above
+    target &= ~3;
 
     regfile.next_pc = target;
 }
@@ -378,6 +386,8 @@ void Allegrex::return_from_exception() {
     if (is_interrupt_pending()) {
         raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
     }
+
+    set_load_linked(false);
 }
 
 void Allegrex::set_syscall_code(const u32 sccode) {
