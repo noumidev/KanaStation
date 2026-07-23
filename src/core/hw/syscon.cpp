@@ -58,6 +58,7 @@ enum SysconCommand {
     SYSCON_COMMAND_CTRL_HR_POWER                 = 0x34,
     SYSCON_COMMAND_GET_POMMEL_VERSION            = 0x40,
     SYSCON_COMMAND_CTRL_VOLTAGE                  = 0x42,
+    SYSCON_COMMAND_CTRL_POWER                    = 0x45,
     SYSCON_COMMAND_GET_POWER_STATUS              = 0x46,
     SYSCON_COMMAND_CTRL_LED                      = 0x47,
     SYSCON_COMMAND_CTRL_LEPTON_POWER             = 0x4B,
@@ -265,6 +266,9 @@ static void common_write(const u8 command) {
         case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
             logger->debug("CTRL_VOLTAGE: {}", data);
             break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_POWER:
+            logger->debug("CTRL_POWER: {}", data);
+            break;
         case SysconCommand::SYSCON_COMMAND_CTRL_LED:
             logger->debug("CTRL_LED: {}", data);
             break;
@@ -386,6 +390,7 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_RESET_DEVICE:
         case SysconCommand::SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING:
         case SysconCommand::SYSCON_COMMAND_CTRL_VOLTAGE:
+        case SysconCommand::SYSCON_COMMAND_CTRL_POWER:
         case SysconCommand::SYSCON_COMMAND_CTRL_LED:
         case SysconCommand::SYSCON_COMMAND_CTRL_LEPTON_POWER:
         case SysconCommand::SYSCON_COMMAND_CTRL_MS_POWER:
