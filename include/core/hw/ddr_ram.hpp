@@ -3,7 +3,7 @@
  * Copyright (C) 2026  noumidev
  */
 
-/* core/hw/ddr_ram.cpp - DDR memory (32 MB) */
+/* core/hw/ddr_ram.hpp - DDR memory (32 MB) */
 
 #pragma once
 
