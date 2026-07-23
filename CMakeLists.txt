@@ -34,6 +34,7 @@ set(SOURCES
     src/core/hw/audio.cpp
     src/core/hw/boot_rom.cpp
     src/core/hw/bus.cpp
+    src/core/hw/clockdiv.cpp
     src/core/hw/ddr_ram.cpp
     src/core/hw/dmac.cpp
     src/core/hw/dmacplus.cpp
@@ -70,6 +71,7 @@ set(HEADERS
     include/core/hw/audio.hpp
     include/core/hw/boot_rom.hpp
     include/core/hw/bus.hpp
+    include/core/hw/clockdiv.hpp
     include/core/hw/ddr_ram.hpp
     include/core/hw/dmac.hpp
     include/core/hw/dmacplus.hpp

@@ -18,6 +18,7 @@
 #include <core/hw/audio.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/clockdiv.hpp>
 #include <core/hw/ddr_ram.hpp>
 #include <core/hw/dmac.hpp>
 #include <core/hw/dmacplus.hpp>
@@ -96,6 +97,7 @@ void initialize(const Configuration config) {
     scheduler::initialize();
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
+    hw::clockdiv::initialize();
     hw::ddr_ram::initialize();
     hw::dmac::initialize();
     hw::dmacplus::initialize();
@@ -128,6 +130,7 @@ void soft_reset() {
     scheduler::soft_reset();
     hw::audio::soft_reset();
     hw::boot_rom::soft_reset();
+    hw::clockdiv::soft_reset();
     hw::ddr_ram::soft_reset();
     hw::dmac::soft_reset();
     hw::dmacplus::soft_reset();
@@ -161,6 +164,7 @@ void hard_reset() {
     scheduler::hard_reset();
     hw::audio::hard_reset();
     hw::boot_rom::hard_reset();
+    hw::clockdiv::hard_reset();
     hw::ddr_ram::hard_reset();
     hw::dmac::hard_reset();
     hw::dmacplus::hard_reset();
@@ -205,6 +209,7 @@ void shutdown() {
     scheduler::shutdown();
     hw::audio::shutdown();
     hw::boot_rom::shutdown();
+    hw::clockdiv::shutdown();
     hw::ddr_ram::shutdown();
     hw::dmac::shutdown();
     hw::dmacplus::shutdown();
