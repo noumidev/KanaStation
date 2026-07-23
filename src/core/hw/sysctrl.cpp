@@ -338,6 +338,9 @@ void hard_reset() {
 
     kanacore::get_sc_bus_ptr()->map(SYSCTRL_ADDR, SYSCTRL_SIZE, page_desc);
 
+    HW_SYSCTRL_PLLCTRL = 5;
+    HW_SYSCTRL_PLLMULT = 0x01240901;
+
     // Things to consider:
     // Media Engine has its own set of SYSCTRL registers here, how do we deal with this?
 }
