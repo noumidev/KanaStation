@@ -79,7 +79,10 @@ enum Opcode {
     OPCODE_SW       = 0x2B,
     OPCODE_SWR      = 0x2E,
     OPCODE_CACHE    = 0x2F,
+    OPCODE_LL       = 0x30,
     OPCODE_LWC1     = 0x31,
+    OPCODE_LQC2     = 0x36,
+    OPCODE_SC       = 0x38,
     OPCODE_SWC1     = 0x39,
     OPCODE_VFPU6    = 0x3C,
     OPCODE_VFPU7    = 0x3F,
@@ -576,6 +579,17 @@ static i64 i_lhu(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_ll(Allegrex* cpu, const u32 instr) {
+    cpu->set_reg(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
+    cpu->set_load_linked(true);
+    return 1;
+}
+
+static i64 i_lqc2(Allegrex* cpu, const u32) {
+    cpu->get_logger()->warn("Unimplemented LQC2");
+    return 1;
+}
+
 static i64 i_lui(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RT, UIMM << 16);
     return 1;
@@ -749,6 +763,18 @@ static i64 i_rotrv(Allegrex* cpu, const u32 instr) {
 
 static i64 i_sb(Allegrex* cpu, const u32 instr) {
     cpu->write<u8>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u8)cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_sc(Allegrex* cpu, const u32 instr) {
+    if (cpu->is_load_linked()) {
+        cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM, cpu->get_reg(RT));
+        cpu->set_reg(RT, 1);
+    } else {
+        cpu->set_reg(RT, 0);
+    }
+
+    cpu->set_load_linked(false);
     return 1;
 }
 
@@ -1157,7 +1183,10 @@ void initialize() {
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
     primary_table[Opcode::OPCODE_SWR     ] = i_swr;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
+    primary_table[Opcode::OPCODE_LL      ] = i_ll;
     primary_table[Opcode::OPCODE_LWC1    ] = i_lwc1;
+    primary_table[Opcode::OPCODE_LQC2    ] = i_lqc2;
+    primary_table[Opcode::OPCODE_SC      ] = i_sc;
     primary_table[Opcode::OPCODE_SWC1    ] = i_swc1;
     primary_table[Opcode::OPCODE_VFPU6   ] = i_vfpu6;
     primary_table[Opcode::OPCODE_VFPU7   ] = i_vfpu7;
