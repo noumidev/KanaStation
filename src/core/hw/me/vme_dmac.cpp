@@ -72,7 +72,21 @@ static struct {
 } ctx;
 
 static void end_command(const int) {
+    HW_VMEDMAC_STATUS &= ~0x800;
+
     intc::assert_me_interrupt(VMEDMAC_INTERRUPT);
+}
+
+static void end_transfer(const int vme_busy) {
+    HW_VMEDMAC_STATUS &= ~0x200;
+
+    intc::assert_me_interrupt(VMEDMAC_INTERRUPT);
+
+    if (vme_busy != 0) {
+        HW_VMEDMAC_STATUS |= 0x800;
+
+        scheduler::schedule_event(scheduler::EventType::VME_DMA, end_command, vme_busy, scheduler::from_microseconds(5));
+    }
 }
 
 static void start_command() {
@@ -92,17 +106,21 @@ static void start_command() {
             exit(1);
     }
 
-    // After sending a "command", MeBooter will only read the STATUS register
-    // before sending further commands. This does not seem to clear interrupts however,
-    // so we will do it here
-    intc::clear_me_interrupt(VMEDMAC_INTERRUPT);
-    scheduler::schedule_event(scheduler::EventType::VME_DMA, end_command, 0, scheduler::from_microseconds(2));
+    // There are commands that set VME_BUSY first I believe, but for now this should be fine
+    HW_VMEDMAC_STATUS |= 0x200;
+
+    const bool vme_busy = command == VmeDmacCommand::VMEDMAC_COMMAND_UPLOAD_BITSTREAM;
+
+    scheduler::schedule_event(scheduler::EventType::VME_DMA, end_transfer, vme_busy, scheduler::from_microseconds(5));
 }
 
 static u32 read(const u32 addr) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read32");
+
+            // Probably clears the interrupt after all
+            intc::clear_me_interrupt(VMEDMAC_INTERRUPT);
 
             // The ME firmware will poll bits 9 and/or 11 after commands.
             // TODO: figure out what these bits mean
