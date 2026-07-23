@@ -202,6 +202,7 @@ enum IoAddress {
 
 enum KirkCommand {
     KIRK_COMMAND_DECRYPT_PRIVATE    = 0x01,
+    KIRK_COMMAND_ENCRYPT_PERCONSOLE = 0x05,
     KIRK_COMMAND_DECRYPT_STATIC     = 0x07,
     KIRK_COMMAND_DECRYPT_PERCONSOLE = 0x08,
     KIRK_COMMAND_HASH               = 0x0B,
@@ -583,6 +584,48 @@ static i32 command_decrypt_private() {
     return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
+static i32 command_encrypt_perconsole() {
+    logger->debug("ENCRYPT_PERCONSOLE");
+
+    // TODO: use named constants
+
+    u32 mode;
+    u32 submode;
+
+    dma_read(HW_KIRK_SRCADDR + 0x00, (u8*)&mode, sizeof(mode));
+    dma_read(HW_KIRK_SRCADDR + 0x0C, (u8*)&submode, sizeof(submode));
+
+    if ((mode != 4) || ((submode >> 8) != 1)) {
+        logger->warn("Invalid mode {:08X} {:06X}", mode, submode >> 8);
+        return KirkResult::KIRK_RESULT_INVALID_MODE;
+    }
+
+    u32 body_size;
+
+    dma_read(HW_KIRK_SRCADDR + 0x10, (u8*)&body_size, sizeof(body_size));
+
+    if (body_size == 0) {
+        logger->warn("Body size is 0");
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
+
+    u8 key[AES_KEY_SIZE];
+
+    get_individual_key(1, key);
+
+    body_size = align_up(body_size);
+
+    std::vector<u8> buf(body_size);
+
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
+    aes_encrypt(key, buf.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
+
+    HW_KIRK_STATUS.needs_second_phase = false;
+
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
 static i32 command_decrypt_static() {
     logger->debug("DECRYPT_STATIC");
 
@@ -778,6 +821,9 @@ static void start_first_phase() {
     switch (HW_KIRK_COMMAND) {
         case KirkCommand::KIRK_COMMAND_DECRYPT_PRIVATE:
             result = command_decrypt_private();
+            break;
+        case KirkCommand::KIRK_COMMAND_ENCRYPT_PERCONSOLE:
+            result = command_encrypt_perconsole();
             break;
         case KirkCommand::KIRK_COMMAND_DECRYPT_STATIC:
             result = command_decrypt_static();
