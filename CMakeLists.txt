@@ -17,6 +17,7 @@ project(KanaStation CXX)
 # Add subdirectories
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/cryptopp-cmake)
 add_subdirectory(${PROJECT_SOURCE_DIR}/external/spdlog)
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/tomlplusplus)
 
 # Enable assertions in RelWithDebInfo builds
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
@@ -100,4 +101,4 @@ set(HEADERS
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-target_link_libraries(${PROJECT_NAME} PRIVATE cryptopp spdlog SDL3::SDL3)
+target_link_libraries(${PROJECT_NAME} PRIVATE cryptopp spdlog tomlplusplus::tomlplusplus SDL3::SDL3)
