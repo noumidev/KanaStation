@@ -84,6 +84,8 @@ static struct {
     std::array<u8, SCRATCHPAD_SIZE> scratchpad;
 
     u8 baryon_status;
+
+    bool service_mode;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -428,12 +430,14 @@ static void start_command() {
     gpio::clear_pin(gpio::Pin::PIN_SYSCON_ACKNOWLEDGE);
 }
 
-void initialize() {
+void initialize(const bool service_mode) {
     logger = spdlog::stdout_color_st("SYSCON");
 
     std::memcpy(ctx.scratchpad.data(), INITIAL_SCRATCHPAD, SCRATCHPAD_SIZE);
 
     ctx.baryon_status = BaryonStatus::BARYON_STATUS_ALARM | BaryonStatus::BARYON_STATUS_AC_POWER;
+
+    ctx.service_mode = service_mode;
 }
 
 void soft_reset() {
@@ -441,9 +445,7 @@ void soft_reset() {
 }
 
 void hard_reset() {
-    constexpr bool BOOT_SERVICE_MODE = false;
-
-    if (BOOT_SERVICE_MODE) {
+    if (ctx.service_mode) {
         gpio::set_pin(gpio::Pin::PIN_SYSCON_ACKNOWLEDGE);
     }
 }

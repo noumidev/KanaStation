@@ -52,7 +52,7 @@ static const std::unordered_map<SDL_Scancode, kanacore::Button> key_bindings = {
     { SDL_SCANCODE_B, kanacore::Button::BUTTON_NOTE     },
 };
 
-SDL_AppResult SDL_AppInit(void**, int argc, char** argv) {
+SDL_AppResult SDL_AppInit(void**, int, char**) {
     if (
         !SDL_CreateWindowAndRenderer(
             "KanaStation",
@@ -99,7 +99,7 @@ SDL_AppResult SDL_AppInit(void**, int argc, char** argv) {
 
     spdlog::set_pattern("[%n] [%^%l%$] %v");
 
-    kanacore::Configuration config = kanacore::parse_args(argc, argv);
+    kanacore::Configuration config = kanacore::parse_args();
     
     kanacore::initialize(config);
     kanacore::hard_reset();

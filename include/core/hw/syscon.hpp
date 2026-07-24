@@ -11,7 +11,7 @@
 
 namespace kanacore::hw::syscon {
 
-void initialize();
+void initialize(const bool service_mode);
 void soft_reset();
 void hard_reset();
 void shutdown();

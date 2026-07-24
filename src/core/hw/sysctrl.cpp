@@ -33,8 +33,6 @@ constexpr u64 SYSCTRL_SIZE = 0x1000;
 constexpr u32 TACHYON_VERSION = 0x40000000;
 constexpr u32 RAM_SIZE = 1;
 
-constexpr u64 FUSEID = 0x0000590BB2A18793;
-
 enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
@@ -105,6 +103,8 @@ static struct {
     u32 gpio_enable;
     u32 connection_status;
     u32 pll_multiplier;
+
+    u64 fuse_id;
 } ctx;
 
 static void reset_sc() {
@@ -170,10 +170,10 @@ static u32 read(const u32 addr) {
             return HW_SYSCTRL_CONNSTAT;
         case IoAddress::IO_ADDRESS_FUSEID_LO:
             logger->debug("FUSEID_LO read32");
-            return (u32)FUSEID;
+            return (u32)ctx.fuse_id;
         case IoAddress::IO_ADDRESS_FUSEID_HI:
             logger->debug("FUSEID_HI read32");
-            return FUSEID >> 32;
+            return ctx.fuse_id >> 32;
         case IoAddress::IO_ADDRESS_FUSECONFIG:
             logger->debug("FUSECONFIG read32");
             return FUSECONFIG;
@@ -312,7 +312,7 @@ static void write(const u32 addr, const u32 data) {
     }
 }
 
-void initialize() {
+void initialize(const u64 fuse_id) {
     logger = spdlog::stdout_color_st("SysCtrl");
 
     reset_funcs.fill(nullptr);
@@ -323,6 +323,8 @@ void initialize() {
     std::memset(&ctx, 0, sizeof(ctx));
 
     HW_SYSCTRL_RAMSIZE = TACHYON_VERSION | RAM_SIZE;
+
+    ctx.fuse_id = fuse_id;
 }
 
 void soft_reset() {
@@ -354,7 +356,7 @@ u32 get_gpio_enable() {
 }
 
 u64 get_fuseid() {
-    return FUSEID;
+    return ctx.fuse_id;
 }
 
 void set_ms0_connected() {

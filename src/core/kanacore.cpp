@@ -95,6 +95,8 @@ void initialize(const Configuration config) {
     }
 
     scheduler::initialize();
+    hw::sysctrl::initialize(config.fuse_id);
+
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::clockdiv::initialize();
@@ -110,8 +112,7 @@ void initialize(const Configuration config) {
     hw::shared_ram::initialize();
     hw::spi::initialize();
     hw::spock::initialize();
-    hw::syscon::initialize();
-    hw::sysctrl::initialize();
+    hw::syscon::initialize(config.service_mode);
     hw::systime::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();

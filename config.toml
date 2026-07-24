@@ -1,0 +1,21 @@
+[core]
+# 48-bit console unique identifier (REQUIRED)
+fuse_id = 0x590b_b2a18793
+# Motherboard type/revision (REQUIRED)
+mobo_type = "TA-082"
+# Boots emulator into service mode when true, reading an IPL from Memory Stick (REQUIRED)
+service_mode = false
+
+[boot_rom]
+# REQUIRED
+path = ""
+
+[nand]
+# REQUIRED
+path = ""
+
+[memory_stick]
+path = ""
+
+[umd]
+path = ""

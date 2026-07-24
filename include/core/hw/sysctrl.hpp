@@ -11,7 +11,7 @@
 
 namespace kanacore::hw::sysctrl {
 
-void initialize();
+void initialize(const common::u64 fuse_id);
 void soft_reset();
 void hard_reset();
 void shutdown();
