@@ -164,6 +164,10 @@ static void start_transmission() {
     assert(!transmit_fifo.empty());
     assert(HW_SPI_CONTROL.serial_enable);
 
+    if (HW_SPI_STATUS.busy) {
+        return;
+    }
+
     logger->debug("Starting transmission");
 
     HW_SPI_STATUS.busy = true;
