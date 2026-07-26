@@ -24,6 +24,7 @@ enum EventType {
     KIRK_1ST_PHASE,
     SPOCK,
     LEPTON,
+    ATAPI,
     SPI_TX,
     SYSCON_TX,
     I2C,

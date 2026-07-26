@@ -15,6 +15,7 @@
 
 #include <common/types.hpp>
 #include <core/scheduler.hpp>
+#include <core/hw/atapi.hpp>
 #include <core/hw/audio.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
@@ -97,6 +98,7 @@ void initialize(const Configuration config) {
     scheduler::initialize();
     hw::sysctrl::initialize(config.fuse_id);
 
+    hw::atapi::initialize();
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::clockdiv::initialize();
@@ -129,6 +131,7 @@ void initialize(const Configuration config) {
 void soft_reset() {
     // This should soft reset all components (preserves RAM contents, ...)
     scheduler::soft_reset();
+    hw::atapi::soft_reset();
     hw::audio::soft_reset();
     hw::boot_rom::soft_reset();
     hw::clockdiv::soft_reset();
@@ -163,6 +166,7 @@ void soft_reset() {
 void hard_reset() {
     // This should hard reset all components (including memory)
     scheduler::hard_reset();
+    hw::atapi::hard_reset();
     hw::audio::hard_reset();
     hw::boot_rom::hard_reset();
     hw::clockdiv::hard_reset();
@@ -208,6 +212,7 @@ void hard_reset() {
 void shutdown() {
     // This shuts down all components
     scheduler::shutdown();
+    hw::atapi::shutdown();
     hw::audio::shutdown();
     hw::boot_rom::shutdown();
     hw::clockdiv::shutdown();

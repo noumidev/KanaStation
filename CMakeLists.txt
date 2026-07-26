@@ -32,6 +32,7 @@ set(SOURCES
     src/core/config.cpp
     src/core/kanacore.cpp
     src/core/scheduler.cpp
+    src/core/hw/atapi.cpp
     src/core/hw/audio.cpp
     src/core/hw/boot_rom.cpp
     src/core/hw/bus.cpp
@@ -69,6 +70,7 @@ set(HEADERS
     include/core/config.hpp
     include/core/kanacore.hpp
     include/core/scheduler.hpp
+    include/core/hw/atapi.hpp
     include/core/hw/audio.hpp
     include/core/hw/boot_rom.hpp
     include/core/hw/bus.hpp
