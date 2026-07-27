@@ -21,6 +21,7 @@
 #include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/gpio.hpp>
 #include <core/hw/intc.hpp>
 
 namespace kanacore::hw::atapi {
@@ -65,7 +66,8 @@ enum AtaCommand {
 };
 
 enum ScsiCommand {
-    SCSI_COMMAND_INQUIRY = 0x12,
+    SCSI_COMMAND_TEST_UNIT_READY = 0x00,
+    SCSI_COMMAND_INQUIRY         = 0x12,
 };
 
 #define HW_ATAPI_AHB_PIOCTRL ctx.ahb.pio_control
@@ -142,12 +144,46 @@ static struct {
     } device_control;
 } ctx;
 
+class Umd {
+private:
+    FILE* file;
+
+    u64 file_size;
+
+public:
+    bool is_mounted() const {
+        return file != nullptr;
+    }
+
+    bool mount(const char* path) {
+        if (path == nullptr) {
+            std::printf("NO PATH\n");
+            return false;
+        }
+
+        file = std::fopen(path, "rb");
+
+        if (file == nullptr) {
+            std::printf("NO FILE\n");
+            return false;
+        }
+
+        std::fseek(file, 0, SEEK_END);
+        file_size = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+
+        return true;
+    }
+};
+
 static std::shared_ptr<spdlog::logger> logger;
 
 static std::queue<u16> in_fifo;
 static std::queue<u16> out_fifo;
 
 static std::vector<u8> in_params;
+
+static Umd umd;
 
 static void assert_interrupt() {
     if (!HW_ATAPI_DEVCTRL.interrupt_disable) {
@@ -203,6 +239,12 @@ static void write_out_fifo(const char* data, const int length) {
     }
 }
 
+static u16 scsi_command_test_unit_ready() {
+    // Doesn't return any data, only CHECK_CONDITION when something is wrong?
+    logger->debug("SCSI TEST_UNIT_READY");
+    return 0;
+}
+
 static u16 scsi_command_inquiry() {
     constexpr u8 INQUIRY_SIZE = 0x60;
 
@@ -237,17 +279,16 @@ static u16 scsi_command_inquiry() {
     // Drive serial/vendor-unique
     write_out_fifo("1.150AAug30 ,2005   ", 20);
 
-    for (int i = 56; i < INQUIRY_SIZE; i++) {
-        write_out_fifo(0);
-    }
-
-    return INQUIRY_SIZE;
+    return out_fifo.size();
 }
 
 static void end_scsi_command(const int command) {
     u16 length;
 
     switch (command) {
+        case ScsiCommand::SCSI_COMMAND_TEST_UNIT_READY:
+            length = scsi_command_test_unit_ready();
+            break;
         case ScsiCommand::SCSI_COMMAND_INQUIRY:
             length = scsi_command_inquiry();
             break;
@@ -461,8 +502,8 @@ static void write8(const u32 addr, const u8 data) {
             HW_ATAPI_DEVCTRL.raw = data;
 
             if (HW_ATAPI_DEVCTRL.software_reset) {
-                logger->error("Unimplemented soft reset");
-                exit(1);
+                logger->debug("Soft reset");
+                soft_reset();
             }
             break;
         default:
@@ -483,10 +524,14 @@ static void write16(const u32 addr, const u16 data) {
     }
 }
 
-void initialize() {
+void initialize(const char* umd_path) {
     logger = spdlog::stdout_color_st("ATAPI");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    if (umd.mount(umd_path)) {
+        logger->debug("UMD inserted");
+    }
 }
 
 void soft_reset() {
@@ -520,6 +565,19 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+// Called upon LEPTON initialization
+void umd_initialize(const int) {
+    if (!umd.is_mounted()) {
+        gpio::clear_pin(gpio::Pin::PIN_UMD_INSERTED);
+
+        kanacore::release_button(kanacore::Button::BUTTON_UMD);
+    } else {
+        gpio::set_pin(gpio::Pin::PIN_UMD_INSERTED);
+
+        kanacore::press_button(kanacore::Button::BUTTON_UMD);
+    }
 }
 
 };

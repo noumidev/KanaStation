@@ -11,9 +11,11 @@
 
 namespace kanacore::hw::atapi {
 
-void initialize();
+void initialize(const char* umd_path);
 void soft_reset();
 void hard_reset();
 void shutdown();
+
+void umd_initialize(const int);
 
 };

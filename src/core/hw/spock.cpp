@@ -20,6 +20,7 @@
 #include <common/types.hpp>
 #include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
+#include <core/hw/atapi.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/intc.hpp>
@@ -129,6 +130,16 @@ static i32 command_lepton_challenge() {
 
     // umdman waits for this pin to go high after sending the LEPTON_CHALLENGE command
     gpio::set_pin(gpio::PIN_LEPTON_ALIVE);
+
+    // Presumably, this is also where LEPTON will check if a UMD is inserted?
+    // I should test this on hardware, but doing it here doesn't seem to hurt
+    scheduler::schedule_event(
+        scheduler::EventType::LEPTON,
+        atapi::umd_initialize,
+        0,
+        scheduler::from_microseconds(5000),
+        true
+    );
 
     return SPOCK_ERROR_OK;
 }

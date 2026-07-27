@@ -96,16 +96,16 @@ void initialize(const Configuration config) {
     }
 
     scheduler::initialize();
+    hw::gpio::initialize();
     hw::sysctrl::initialize(config.fuse_id);
 
-    hw::atapi::initialize();
+    hw::atapi::initialize(config.umd_path);
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::clockdiv::initialize();
     hw::ddr_ram::initialize();
     hw::dmac::initialize();
     hw::dmacplus::initialize();
-    hw::gpio::initialize();
     hw::i2c::initialize();
     hw::intc::initialize();
     hw::kirk::initialize();
