@@ -58,6 +58,7 @@ enum IoAddress {
 
 static struct {
     u32 inputs;
+    u32 outputs;
 
     u32 output_enable;
     u32 edge_interrupt_enable;
@@ -83,6 +84,8 @@ static const char* get_pin_name(const u32 pin) {
             return "SYSCON_ACKNOWLEDGE";
         case Pin::PIN_LEPTON_ALIVE:
             return "LEPTON_ALIVE";
+        case Pin::PIN_UMD_INSERTED:
+            return "UMD_INSERTED";
         default:
             return "N/A";
     }
@@ -108,6 +111,8 @@ static void clear_pins(const u32 data) {
             } else {
                 logger->warn("No clear handler installed for pin {}", i);
             }
+
+            ctx.outputs &= ~(1 << i);
         }
     }
 }
@@ -122,6 +127,10 @@ static u32 read_pins() {
             logger->debug("Reading pin {}", get_pin_name(i));
 
             data |= ctx.inputs & (1 << i);
+        } else if ((gpio_enable & HW_GPIO_OUTEN & (1 << i)) != 0) {
+            logger->debug("Reading latched pin {}", get_pin_name(i));
+
+            data |= ctx.outputs & (1 << i);
         }
     }
 
@@ -140,6 +149,8 @@ static void set_pins(const u32 data) {
             } else {
                 logger->warn("No set handler installed for pin {}", i);
             }
+
+            ctx.outputs |= 1 << i;
         }
     }
 }

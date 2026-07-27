@@ -15,6 +15,7 @@ enum Pin {
     PIN_SYSCON_NOTIFY      = 3,
     PIN_SYSCON_ACKNOWLEDGE = 4,
     PIN_LEPTON_ALIVE       = 24,
+    PIN_UMD_INSERTED       = 26,
     PIN_NUM                = 32,
 };
 
