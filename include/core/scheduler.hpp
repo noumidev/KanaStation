@@ -33,6 +33,7 @@ enum EventType {
     VME_DMA,
     DMAC_DMA,
     DMACPLUS_DMA,
+    AUDIO,
     SYSTIME,
     VSYNC,
     NUM_EVENT_TYPES,

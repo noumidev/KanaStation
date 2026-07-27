@@ -8,15 +8,20 @@
 #include <core/hw/audio.hpp>
 
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <queue>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <core/kanacore.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/intc.hpp>
 
 namespace kanacore::hw::audio {
 
@@ -25,31 +30,220 @@ using namespace common;
 constexpr u64 AUDIO_ADDR = 0x1E000000;
 constexpr u64 AUDIO_SIZE = 0x1000;
 
-enum IoAddress {};
+// Audio is sent to the FIFOs in chunks of 0x40 stereo samples
+constexpr u64 FIFO_SIZE = 0x40;
 
-static struct {} ctx;
+enum IoAddress {
+    IO_ADDRESS_ENABLE   = AUDIO_ADDR + 0x000,
+    IO_ADDRESS_CHANEN   = AUDIO_ADDR + 0x004,
+    IO_ADDRESS_INTRMASK = AUDIO_ADDR + 0x008,
+    IO_ADDRESS_CHANSTAT = AUDIO_ADDR + 0x00C,
+    IO_ADDRESS_FIFOCLR  = AUDIO_ADDR + 0x010,
+    IO_ADDRESS_INTRSTAT = AUDIO_ADDR + 0x01C,
+    IO_ADDRESS_INTRCLR  = AUDIO_ADDR + 0x024,
+    IO_ADDRESS_FIFOSTAT = AUDIO_ADDR + 0x028,
+    IO_ADDRESS_OUTFREQ  = AUDIO_ADDR + 0x038,
+    IO_ADDRESS_FREQCTRL = AUDIO_ADDR + 0x040,
+    IO_ADDRESS_SRCVOL   = AUDIO_ADDR + 0x050,
+    IO_ADDRESS_OUTDATA  = AUDIO_ADDR + 0x060,
+};
+
+#define HW_AUDIO_ENABLE   ctx.enable
+#define HW_AUDIO_CHANEN   ctx.channel_enable
+#define HW_AUDIO_INTRMASK ctx.interrupt_mask
+#define HW_AUDIO_INTRSTAT ctx.interrupt_status
+#define HW_AUDIO_FIFOSTAT ctx.fifo_status
+#define HW_AUDIO_OUTFREQ  ctx.out_frequency
+#define HW_AUDIO_SRCVOL   ctx.src_volume
+
+enum AudioChannel {
+    AUDIO_CHANNEL_OUT = 0,
+    AUDIO_CHANNEL_SRC = 1,
+    AUDIO_CHANNEL_IN  = 2,
+};
+
+static struct {
+    bool enable;
+    u32 channel_enable;
+    u32 interrupt_mask;
+    u32 interrupt_status;
+    
+    union {
+        u32 raw;
+
+        struct {
+            u32              : 4;
+            u32 out_not_full : 1;
+            u32 src_not_full : 1;
+            u32              : 26;
+        };
+    } fifo_status;
+
+    u16 out_frequency;
+    u16 src_volume;
+
+    int out_stall_count;
+} ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
 
+static std::queue<u32> out_fifo;
+static std::queue<u32> src_fifo;
+
+static void check_pending_interrupts() {
+    if ((HW_AUDIO_INTRSTAT) != 0) {
+        intc::assert_sc_interrupt(10);
+    } else {
+        intc::clear_sc_interrupt(10);
+    }
+}
+
+static void assert_interrupt(const int chan_id) {
+    HW_AUDIO_INTRSTAT |= 1 << chan_id;
+
+    check_pending_interrupts();
+}
+
+static void update_fifo_status() {
+    HW_AUDIO_FIFOSTAT.out_not_full = out_fifo.size() < FIFO_SIZE;
+    HW_AUDIO_FIFOSTAT.src_not_full = src_fifo.size() < FIFO_SIZE;
+}
+
+static void clear_fifos() {
+    while (!out_fifo.empty()) {
+        out_fifo.pop();
+    }
+
+    while (!src_fifo.empty()) {
+        src_fifo.pop();
+    }
+
+    update_fifo_status();
+}
+
+static void push_samples() {
+    while (!out_fifo.empty()) {
+        const u32 samples = out_fifo.front(); out_fifo.pop();
+    }
+}
+
+static void disable_out_channel() {
+    ctx.out_stall_count = 24;
+}
+
+static void blah(const int) {
+    assert_interrupt(AUDIO_CHANNEL_OUT);
+
+    push_samples();
+    update_fifo_status();
+}
+
+static void write_out_fifo(const u32 data) {
+    assert(out_fifo.size() < FIFO_SIZE);
+
+    if (ctx.out_stall_count > 0) {
+        ctx.out_stall_count--;
+        return;
+    }
+
+    out_fifo.push(data);
+
+    if (out_fifo.size() == FIFO_SIZE) {
+        scheduler::schedule_event(
+            scheduler::EventType::AUDIO,
+            blah,
+            scheduler::to_scheduler_cycles(44100, FIFO_SIZE),
+            256,
+            true
+        );
+    }
+
+    update_fifo_status();
+}
+
 static u32 read(const u32 addr) {
     switch (addr) {
-        case AUDIO_ADDR + 0x028:
-            logger->warn("Unmapped read32 @ {:08X}", addr);
-
-            // Unsure what this is; initially, the kernel waits for these two
-            // bits to be set
-            return 0x30;
-        default:
-            logger->warn("Unmapped read32 @ {:08X}", addr);
+        case IoAddress::IO_ADDRESS_ENABLE:
+            logger->debug("ENABLE read32");
+            return HW_AUDIO_ENABLE;
+        case IoAddress::IO_ADDRESS_CHANSTAT:
+            logger->debug("CHANSTAT read32");
+            return HW_AUDIO_CHANEN;
+        case IoAddress::IO_ADDRESS_INTRSTAT:
+            logger->debug("INTRSTAT read32");
+            return HW_AUDIO_INTRSTAT;
+        case IoAddress::IO_ADDRESS_FIFOSTAT:
+            // logger->debug("FIFOSTAT read32");
+            return HW_AUDIO_FIFOSTAT.raw;
+        case IoAddress::IO_ADDRESS_FREQCTRL:
+            logger->debug("FREQCTRL read32");
             return 0;
+        case IoAddress::IO_ADDRESS_SRCVOL:
+            logger->debug("SRCVOL read32");
+            return HW_AUDIO_SRCVOL;
+        default:
+            logger->error("Unmapped read32 @ {:08X}", addr);
+            exit(1);
     }
 }
 
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
-        default:
+        case IoAddress::IO_ADDRESS_ENABLE:
+            logger->debug("ENABLE write32 = {:08X}", data);
+
+            HW_AUDIO_ENABLE = (data & 1) != 0;
+            break;
+        case IoAddress::IO_ADDRESS_CHANEN:
+            logger->debug("CHANEN write32 = {:08X}", data);
+
+            HW_AUDIO_CHANEN = data & 7;
+
+            if ((HW_AUDIO_CHANEN & 1) == 0) {
+                disable_out_channel();
+            }
+            break;
+        case IoAddress::IO_ADDRESS_INTRMASK:
+            logger->debug("INTRMASK write32 = {:08X}", data);
+
+            HW_AUDIO_INTRMASK = data;
+
+            check_pending_interrupts();
+            break;
+        case IoAddress::IO_ADDRESS_INTRCLR:
+            logger->debug("INTRCLR write32 = {:08X}", data);
+
+            HW_AUDIO_INTRSTAT &= data;
+
+            check_pending_interrupts();
+            break;
+        case IoAddress::IO_ADDRESS_OUTFREQ:
+            logger->debug("OUTFREQ write32 = {:08X}", data);
+
+            HW_AUDIO_OUTFREQ = data & 0x1FF;
+            break;
+        case IoAddress::IO_ADDRESS_FREQCTRL:
+            logger->debug("FREQCTRL write32 = {:08X}", data);
+            break;
+        case IoAddress::IO_ADDRESS_SRCVOL:
+            logger->debug("SRCVOL write32 = {:08X}", data);
+
+            HW_AUDIO_SRCVOL = data;
+            break;
+        case IoAddress::IO_ADDRESS_OUTDATA:
+            logger->debug("OUTDATA write32 = {:08X}", data);
+            write_out_fifo(data);
+            break;
+        case AUDIO_ADDR + 0x010:
+        case AUDIO_ADDR + 0x014:
+        case AUDIO_ADDR + 0x018:
+        case AUDIO_ADDR + 0x020:
+        case AUDIO_ADDR + 0x02C:
             logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
+        default:
+            logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
+            exit(1);
     }
 }
 
@@ -60,7 +254,7 @@ void initialize() {
 }
 
 void soft_reset() {
-    
+    clear_fifos();
 }
 
 void hard_reset() {
@@ -71,6 +265,8 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(AUDIO_ADDR, AUDIO_SIZE, page_desc);
+
+    soft_reset();
 }
 
 void shutdown() {
