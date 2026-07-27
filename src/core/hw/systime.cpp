@@ -105,7 +105,7 @@ static void set_alarm(const u32 data) {
 static u32 read(const u32 addr) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_COUNTER:
-            logger->debug("COUNTER read32");
+            // logger->debug("COUNTER read32");
             return get_counter();
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
