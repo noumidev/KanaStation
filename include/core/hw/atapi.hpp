@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <common/types.hpp>
 
 namespace kanacore::hw::atapi {
@@ -19,5 +21,6 @@ void shutdown();
 void assert_transfer_end_interrupt();
 
 void umd_initialize(const int);
+void read_sectors(std::vector<common::u8>& sector_bytes);
 
 };

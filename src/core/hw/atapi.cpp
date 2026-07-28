@@ -69,6 +69,7 @@ enum ScsiCommand {
     SCSI_COMMAND_TEST_UNIT_READY     = 0x00,
     SCSI_COMMAND_REQUEST_SENSE       = 0x03,
     SCSI_COMMAND_INQUIRY             = 0x12,
+    SCSI_COMMAND_READ_LONG           = 0x28,
     SCSI_COMMAND_MODE_SELECT_LONG    = 0x55,
     SCSI_COMMAND_MODE_SENSE_LONG     = 0x5A,
     SCSI_COMMAND_READ_DISC_STRUCTURE = 0xAD,
@@ -184,6 +185,9 @@ private:
 
     u64 file_size;
 
+    u32 lba;
+    u16 num_sectors;
+
 public:
     static constexpr u64 SECTOR_SIZE = 2048;
     static constexpr u64 NUM_SECTORS_SINGLE = 460800;
@@ -211,6 +215,36 @@ public:
         std::fseek(file, 0, SEEK_SET);
 
         return true;
+    }
+
+    u32 get_lba() const {
+        return lba;
+    }
+
+    void set_lba(const int lba) {
+        assert(lba >= 0);
+
+        this->lba = lba;
+    }
+
+    u32 get_num_sectors() {
+        return num_sectors;
+    }
+
+    void set_num_sectors(const u32 num_sectors) {
+        this->num_sectors = num_sectors;
+    }
+
+    void seek() {
+        assert((lba * SECTOR_SIZE) < file_size);
+
+        std::fseek(file, lba * SECTOR_SIZE, SEEK_SET);
+
+        lba++;
+    }
+
+    void read(u8* buf) {
+        std::fread(buf, sizeof(u8), SECTOR_SIZE, file);
     }
 };
 
@@ -417,9 +451,21 @@ static ScsiRetval scsi_command_inquiry() {
     // Drive serial/vendor-unique
     write_out_fifo("1.150AAug30 ,2005   ", 20);
 
-    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
-
     return {(u16)out_fifo.size()};
+}
+
+static ScsiRetval scsi_command_read_long() {
+    logger->debug("SCSI READ (10)");
+
+    assert(umd.is_mounted());
+
+    const u32 lba = (in_params[2] << 24) | (in_params[3] << 16) | (in_params[4] << 8) | in_params[5];
+    const u16 num_sectors = (in_params[7] << 8) | in_params[8];
+
+    umd.set_lba(lba);
+    umd.set_num_sectors(num_sectors);
+
+    return {1};
 }
 
 enum LogPage {
@@ -560,8 +606,6 @@ static ScsiRetval scsi_command_read_disc_stucture() {
             exit(1);
     }
 
-    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
-
     return {(u16)out_fifo.size()};
 }
 
@@ -576,15 +620,11 @@ static ScsiRetval scsi_command_f0() {
     // According to JPCSP, this can return one of four values
     write_out_fifo(0x47);
 
-    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
-
     return {data_length};
 }
 
 static ScsiRetval scsi_command_f1() {
     logger->warn("SCSI F1");
-
-    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
 
     // This command needs to trigger a DATA interrupt, but the kernel also doesn't
     // read any of the data it returns...
@@ -595,8 +635,6 @@ static ScsiRetval scsi_command_f7() {
     logger->warn("SCSI F7");
 
     // No outputs?
-    
-    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
 
     return {};
 }
@@ -613,6 +651,9 @@ static void end_scsi_command(const int command) {
             break;
         case ScsiCommand::SCSI_COMMAND_INQUIRY:
             retval = scsi_command_inquiry();
+            break;
+        case ScsiCommand::SCSI_COMMAND_READ_LONG:
+            retval = scsi_command_read_long();
             break;
         case ScsiCommand::SCSI_COMMAND_MODE_SELECT_LONG:
             retval = scsi_command_mode_select_long();
@@ -951,6 +992,18 @@ void umd_initialize(const int) {
         gpio::set_pin(gpio::Pin::PIN_UMD_INSERTED);
 
         kanacore::press_button(kanacore::Button::BUTTON_UMD);
+    }
+}
+
+void read_sectors(std::vector<u8>& sector_bytes) {
+    const u16 num_sectors  = umd.get_num_sectors();
+    const u32 total_length = Umd::SECTOR_SIZE * num_sectors;
+
+    assert(sector_bytes.size() == total_length);
+
+    for (u16 i = 0; i < num_sectors; i++) {
+        umd.seek();
+        umd.read(sector_bytes.data() + i * Umd::SECTOR_SIZE);
     }
 }
 
