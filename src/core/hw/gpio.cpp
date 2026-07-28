@@ -78,12 +78,22 @@ static std::array<void (*)(void), Pin::PIN_NUM> set_funcs;
 
 static const char* get_pin_name(const u32 pin) {
     switch (pin) {
+        case Pin::PIN_LCD:
+            return "LCD";
         case Pin::PIN_SYSCON_NOTIFY:
             return "SYSCON_NOTIFY";
         case Pin::PIN_SYSCON_ACKNOWLEDGE:
             return "SYSCON_ACKNOWLEDGE";
+        case Pin::PIN_SYSCON_HP_ENABLE:
+            return "HP_ENABLE";
+        case Pin::PIN_SYSCON_MS_LED:
+            return "MS_LED";
+        case Pin::PIN_SYSCON_WLAN_LED:
+            return "WLAN_LED";
         case Pin::PIN_LEPTON_ALIVE:
             return "LEPTON_ALIVE";
+        case Pin::PIN_LEPTON_WAKEUP:
+            return "LEPTON_WAKEUP";
         case Pin::PIN_UMD_INSERTED:
             return "UMD_INSERTED";
         default:
