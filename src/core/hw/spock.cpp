@@ -69,6 +69,7 @@ enum SpockCommand {
     SPOCK_COMMAND_GET_QTGP3        = 0x05,
     SPOCK_COMMAND_DECRYPT_MKI      = 0x08,
     SPOCK_COMMAND_DECRYPT_DKI      = 0x09,
+    SPOCK_COMMAND_DECRYPT_SECTORS  = 0x0A,
     SPOCK_COMMAND_RESET            = 0x0B,
 };
 
@@ -261,6 +262,42 @@ static i32 command_decrypt_dki() {
     return SpockResult::SPOCK_RESULT_OK;
 }
 
+static i32 command_decrypt_sectors() {
+    logger->error("DECRYPT_SECTORS");
+
+    assert((HW_SPOCK_LENGTH > 0) && ((HW_SPOCK_LENGTH % 0x810) == 0));
+
+    // On hardware, this generates a sector key to decrypt incoming UMD sectors.
+    // The decrypted sectors are written to RAM
+
+    const int total_length = (HW_SPOCK_LENGTH / 0x810) * 0x800;
+
+    std::vector<u8> sector_bytes(total_length);
+
+    atapi::read_sectors(sector_bytes);
+
+    u32 sector_num = 0;
+
+    for (u32 i = 0; i < NUM_TRANS_REGS; i++) {
+        const u32 addr = HW_SPOCK_TADDR[i] & ~3;
+
+        assert((HW_SPOCK_TLENGTH[i] & 0x7FF) == 0);
+    
+        dma_write(addr, sector_bytes.data() + sector_num * 0x800, HW_SPOCK_TLENGTH[i]);
+
+        sector_num += HW_SPOCK_TLENGTH[i] / 0x800;
+
+        if ((sector_num * 0x800) >= (u32)total_length) {
+            break;
+        }
+    }
+
+    // Commands that read data from UMD trigger ATA interrupts
+    atapi::assert_transfer_end_interrupt();
+
+    return SpockResult::SPOCK_RESULT_OK;
+}
+
 static i32 command_reset() {
     logger->debug("RESET");
     return SpockResult::SPOCK_RESULT_OK;
@@ -295,6 +332,9 @@ static void start_command() {
             break;
         case SpockCommand::SPOCK_COMMAND_DECRYPT_DKI:
             result = command_decrypt_dki();
+            break;
+        case SpockCommand::SPOCK_COMMAND_DECRYPT_SECTORS:
+            result = command_decrypt_sectors();
             break;
         case SpockCommand::SPOCK_COMMAND_RESET:
             result = command_reset();
@@ -357,6 +397,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_RESULT:
             logger->debug("RESULT read32");
             return HW_SPOCK_RESULT;
+        case IoAddress::IO_ADDRESS_LENGTH:
+            logger->debug("LENGTH read32");
+            return HW_SPOCK_LENGTH;
         case SPOCK_ADDR + 0x014:
         case SPOCK_ADDR + 0x038:
             logger->warn("Unmapped read32 @ {:08X}", addr);
