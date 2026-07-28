@@ -66,8 +66,29 @@ enum AtaCommand {
 };
 
 enum ScsiCommand {
-    SCSI_COMMAND_TEST_UNIT_READY = 0x00,
-    SCSI_COMMAND_INQUIRY         = 0x12,
+    SCSI_COMMAND_TEST_UNIT_READY     = 0x00,
+    SCSI_COMMAND_REQUEST_SENSE       = 0x03,
+    SCSI_COMMAND_INQUIRY             = 0x12,
+    SCSI_COMMAND_MODE_SELECT_LONG    = 0x55,
+    SCSI_COMMAND_MODE_SENSE_LONG     = 0x5A,
+    SCSI_COMMAND_READ_DISC_STRUCTURE = 0xAD,
+};
+
+enum SenseKey {
+    SENSE_KEY_NO_SENSE  = 0x0,
+    SENSE_KEY_NOT_READY = 0x2,
+};
+
+// This is an additional sense code + qualifier pair
+enum AdditionalSense {
+    ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE = 0x0000,
+    ADDITIONAL_SENSE_MEDIUM_NOT_PRESENT  = 0x3A00,
+};
+
+enum AtapiState {
+    ATAPI_STATE_IDLE,
+    ATAPI_STATE_AWAIT_PACKET,
+    ATAPI_STATE_AWAIT_DATA,
 };
 
 #define HW_ATAPI_AHB_PIOCTRL ctx.ahb.pio_control
@@ -142,7 +163,20 @@ static struct {
             u8                   : 5;
         };
     } device_control;
+
+    SenseKey sense_key;
+    AdditionalSense additional_sense;
+
+    bool transfer_from_host;
 } ctx;
+
+struct ScsiRetval {
+    // Apart from length, these should be the most common return values
+    u16 length = 0;
+    bool to_host = true;
+    SenseKey sense_key = SenseKey::SENSE_KEY_NO_SENSE;
+    AdditionalSense additional_sense = AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE;
+};
 
 class Umd {
 private:
@@ -151,6 +185,10 @@ private:
     u64 file_size;
 
 public:
+    static constexpr u64 SECTOR_SIZE = 2048;
+    static constexpr u64 NUM_SECTORS_SINGLE = 460800;
+    static constexpr u64 NUM_SECTORS_DUAL   = 2 * NUM_SECTORS_SINGLE;
+
     bool is_mounted() const {
         return file != nullptr;
     }
@@ -178,6 +216,8 @@ public:
 
 static std::shared_ptr<spdlog::logger> logger;
 
+static AtapiState state = AtapiState::ATAPI_STATE_IDLE;
+
 static std::queue<u16> in_fifo;
 static std::queue<u16> out_fifo;
 
@@ -185,15 +225,59 @@ static std::vector<u8> in_params;
 
 static Umd umd;
 
+static inline void state_transition(const AtapiState new_state) {
+    state = new_state;
+}
+
+static inline void set_reason(const bool is_command, const bool from_device) {
+    HW_ATAPI_REASON.is_command  = is_command;
+    HW_ATAPI_REASON.from_device = from_device;
+
+    ctx.transfer_from_host = !from_device;
+}
+
 static void assert_interrupt() {
     if (!HW_ATAPI_DEVCTRL.interrupt_disable) {
         intc::assert_sc_interrupt(ATA_INTERRUPT);
     }
 }
 
-static void set_reason(const bool is_command, const bool from_device) {
-    HW_ATAPI_REASON.is_command  = is_command;
-    HW_ATAPI_REASON.from_device = from_device;
+static void check_condition(const SenseKey sense_key, const AdditionalSense additional_sense) {
+    if (sense_key == SenseKey::SENSE_KEY_NO_SENSE) {
+        HW_ATAPI_STATUS.check_condition = 0;
+        HW_ATAPI_STATUS.sense_available = 0;
+    } else {
+        HW_ATAPI_STATUS.check_condition = 1;
+        HW_ATAPI_STATUS.sense_available = 1;
+    }
+
+    ctx.sense_key = sense_key;
+    ctx.additional_sense = additional_sense;
+}
+
+static inline u16 get_length() {
+    return (HW_ATAPI_LBA_HI << 8) | HW_ATAPI_LBA_MID;
+}
+
+static void assert_scsi_interrupt(const ScsiRetval retval) {
+    HW_ATAPI_LBA_MID = retval.length;
+    HW_ATAPI_LBA_HI  = retval.length >> 8;
+
+    HW_ATAPI_STATUS.data_request = retval.length != 0;
+    HW_ATAPI_STATUS.device_ready = retval.length == 0;
+
+    set_reason(retval.length == 0, retval.to_host);
+    check_condition(retval.sense_key, retval.additional_sense);
+
+    HW_ATAPI_STATUS.busy = 0;
+    
+    assert_interrupt();
+
+    if (retval.length > 0) {
+        state_transition(AtapiState::ATAPI_STATE_AWAIT_DATA);
+    } else {
+        state_transition(AtapiState::ATAPI_STATE_IDLE);
+    }
 }
 
 static void get_in_params() {
@@ -219,11 +303,7 @@ static u16 get_out_data() {
     }
 
     if (out_fifo.empty()) {
-        HW_ATAPI_STATUS.data_request = 0;
-
-        set_reason(true, true);
-
-        assert_interrupt();
+        assert_transfer_end_interrupt();
     }
 
     return data;
@@ -239,13 +319,71 @@ static void write_out_fifo(const char* data, const int length) {
     }
 }
 
-static u16 scsi_command_test_unit_ready() {
-    // Doesn't return any data, only CHECK_CONDITION when something is wrong?
-    logger->debug("SCSI TEST_UNIT_READY");
-    return 0;
+static void clear_fifos() {
+    while (!in_fifo.empty()) {
+        in_fifo.pop();
+    }
+
+    while (!out_fifo.empty()) {
+        out_fifo.pop();
+    }
 }
 
-static u16 scsi_command_inquiry() {
+static ScsiRetval scsi_command_test_unit_ready() {
+    logger->debug("SCSI TEST_UNIT_READY");
+
+    if (!umd.is_mounted()) {
+        check_condition(SenseKey::SENSE_KEY_NOT_READY, AdditionalSense::ADDITIONAL_SENSE_MEDIUM_NOT_PRESENT);
+    } else {
+        check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+    }
+
+    return {};
+}
+
+static ScsiRetval scsi_command_request_sense() {
+    constexpr u8 REQUEST_SENSE_SIZE = 0x12;
+
+    constexpr u8 VALID = 0x80;
+    constexpr u8 RESPONSE_CODE = 0x70;
+
+    logger->debug("SCSI REQUEST_SENSE");
+
+    const u8 descriptor_format = in_params[1] & 1;
+
+    // 0 means we return fixed-format sense data
+    assert(descriptor_format == 0);
+
+    write_out_fifo(VALID | RESPONSE_CODE);
+    write_out_fifo(0);
+    write_out_fifo(ctx.sense_key);
+    // Information field. I don't know what values this can have
+    write_out_fifo(0);
+    write_out_fifo(0);
+    write_out_fifo(0);
+    write_out_fifo(0);
+    write_out_fifo(REQUEST_SENSE_SIZE - 7);
+    // Command-specific data. TEST_UNIT_READY might not return data here?
+    write_out_fifo(0);
+    write_out_fifo(0);
+    write_out_fifo(0);
+    write_out_fifo(0);
+    // ASC(Q)
+    write_out_fifo(ctx.additional_sense >> 8);
+    write_out_fifo(ctx.additional_sense >> 0);
+    // Field-replacable unit code. Probably always 0 if there is no
+    // hardware failure
+    write_out_fifo(0);
+    // Sense key-specific data. The standard says this should always contain valid
+    // info, but I don't know if UMD drives return anything here
+    write_out_fifo(VALID);
+    write_out_fifo(0);
+    write_out_fifo(0);
+
+    return {REQUEST_SENSE_SIZE};
+}
+
+static ScsiRetval scsi_command_inquiry() {
     constexpr u8 INQUIRY_SIZE = 0x60;
 
     // Some identifying info for UMD drives
@@ -279,35 +417,227 @@ static u16 scsi_command_inquiry() {
     // Drive serial/vendor-unique
     write_out_fifo("1.150AAug30 ,2005   ", 20);
 
-    return out_fifo.size();
+    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+
+    return {(u16)out_fifo.size()};
+}
+
+enum LogPage {
+    LOG_PAGE_POWER_CONDITION_TRANSITIONS = 0x1A00,
+};
+
+// This command might have a 6-byte CDB variant
+static ScsiRetval scsi_command_mode_select_long() {
+    logger->debug("SCSI MODE_SELECT (10)");
+
+    const u16 data_length = (in_params[7] << 8) | in_params[8];
+
+    // Await data from the host
+    return {data_length, false};
+}
+
+// This command might have a 6-byte CDB variant, too
+static ScsiRetval scsi_command_mode_sense_long() {
+    constexpr u16 MODE_SENSE_SIZE = 0x1C;
+
+    logger->debug("SCSI MODE_SENSE (10)");
+
+    const u16 log_page_code = (in_params[2] << 8) | in_params[3];
+
+    switch (log_page_code) {
+        case LogPage::LOG_PAGE_POWER_CONDITION_TRANSITIONS: {
+            const u16 data_length = MODE_SENSE_SIZE - sizeof(u16);
+
+            logger->trace("POWER_CONDITION_TRANSITIONS");
+
+            // Until I can check what values my PSPs return, we will use JPCSP's
+            write_out_fifo(data_length >> 8);
+            write_out_fifo(data_length >> 0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0x9A);
+            write_out_fifo(0x12);
+            write_out_fifo(0);
+            write_out_fifo(2);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(6);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(4);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(4);
+            break;
+        }
+        default:
+            logger->error("Unimplemented log page {:04X} for MODE SENSE (10)", log_page_code);
+            exit(1);
+    }
+
+    return {MODE_SENSE_SIZE};
+}
+
+enum FormatCode {
+    FORMAT_CODE_PHYSICAL_FORMAT = 0x00,
+};
+
+static ScsiRetval scsi_command_read_disc_stucture() {
+    // Only for format 0
+    constexpr u16 READ_DISC_STRUCTURE_SIZE = 0x20;
+
+    logger->debug("SCSI READ_DISC_STRUCTURE");
+
+    const u8 media_type = in_params[1] & 0xF;
+    const u32 addr  = (in_params[2] << 24) | (in_params[3] << 16) | (in_params[4] << 8) | in_params[5];
+    const u8 layer  = in_params[6];
+    const u8 format = in_params[7];
+
+    assert(media_type == 0);
+    assert(addr == 0);
+    assert(layer == 0);
+    
+    switch (format) {
+        case FormatCode::FORMAT_CODE_PHYSICAL_FORMAT: {
+            const u16 data_length = READ_DISC_STRUCTURE_SIZE + sizeof(u32);
+
+            const u32 first_sector = 0x30000;
+            const u32 last_sector  = first_sector + Umd::NUM_SECTORS_DUAL - 1;
+
+            logger->trace("PHYSICAL_FORMAT");
+
+            write_out_fifo(data_length >> 8);
+            write_out_fifo(data_length >> 0);
+            // Reserved
+            write_out_fifo(0);
+            write_out_fifo(0);
+            // The following values are taken from JPCSP until I can send disc commands on my PSP
+            // Disc type
+            write_out_fifo(0x80);
+            // Disc size/rate
+            write_out_fifo(0);
+            // Layer count/type
+            // Dual-layer UMDs probably return something else here...
+            write_out_fifo(1);
+            // Layer density
+            write_out_fifo(0xE0);
+            write_out_fifo(0);
+            // First sector
+            write_out_fifo((u8)(first_sector >> 16));
+            write_out_fifo((u8)(first_sector >> 8));
+            write_out_fifo((u8)(first_sector >> 0));
+            write_out_fifo(0);
+            // Last sector
+            write_out_fifo((u8)(last_sector >> 16));
+            write_out_fifo((u8)(last_sector >> 8));
+            write_out_fifo((u8)(last_sector >> 0));
+            write_out_fifo(0);
+            // Last sector in layer 0?
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(0);
+            write_out_fifo(7);
+
+            for (u16 i = 22; i < data_length; i++) {
+                write_out_fifo(0);
+            }
+            break;
+        }
+        default:
+            logger->error("Unimplemented disc structure format code {:02X}", format);
+            exit(1);
+    }
+
+    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+
+    return {(u16)out_fifo.size()};
+}
+
+static ScsiRetval scsi_command_f0() {
+    // MAYBE this is the allocation length?
+    const u8 data_length = in_params[1];
+
+    logger->warn("SCSI F0");
+
+    assert(data_length == 1);
+
+    // According to JPCSP, this can return one of four values
+    write_out_fifo(0x47);
+
+    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+
+    return {data_length};
+}
+
+static ScsiRetval scsi_command_f1() {
+    logger->warn("SCSI F1");
+
+    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+
+    // This command needs to trigger a DATA interrupt, but the kernel also doesn't
+    // read any of the data it returns...
+    return {1};
+}
+
+static ScsiRetval scsi_command_f7() {
+    logger->warn("SCSI F7");
+
+    // No outputs?
+    
+    check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+
+    return {};
 }
 
 static void end_scsi_command(const int command) {
-    u16 length;
+    ScsiRetval retval;
 
     switch (command) {
         case ScsiCommand::SCSI_COMMAND_TEST_UNIT_READY:
-            length = scsi_command_test_unit_ready();
+            retval = scsi_command_test_unit_ready();
+            break;
+        case ScsiCommand::SCSI_COMMAND_REQUEST_SENSE:
+            retval = scsi_command_request_sense();
             break;
         case ScsiCommand::SCSI_COMMAND_INQUIRY:
-            length = scsi_command_inquiry();
+            retval = scsi_command_inquiry();
+            break;
+        case ScsiCommand::SCSI_COMMAND_MODE_SELECT_LONG:
+            retval = scsi_command_mode_select_long();
+            break;
+        case ScsiCommand::SCSI_COMMAND_MODE_SENSE_LONG:
+            retval = scsi_command_mode_sense_long();
+            break;
+        case ScsiCommand::SCSI_COMMAND_READ_DISC_STRUCTURE:
+            retval = scsi_command_read_disc_stucture();
+            break;
+        case 0xF0:
+            retval = scsi_command_f0();
+            break;
+        case 0xF1:
+            retval = scsi_command_f1();
+            break;
+        case 0xF7:
+            retval = scsi_command_f7();
             break;
         default:
             logger->error("Unimplemented SCSI command {:02X}", command);
             exit(1);
     }
 
-    HW_ATAPI_LBA_MID = length;
-    HW_ATAPI_LBA_HI  = length >> 8;
-
-    HW_ATAPI_STATUS.data_request = length != 0;
-    HW_ATAPI_STATUS.device_ready = 1;
-
-    set_reason(false, true);
-
-    HW_ATAPI_STATUS.busy = 0;
-    
-    assert_interrupt();
+    assert_scsi_interrupt(retval);
 }
 
 static void start_scsi_command() {
@@ -340,6 +670,7 @@ static void end_ata_command(const int command) {
     switch (command) {
         case AtaCommand::ATA_COMMAND_PACKET:
             ata_command_packet();
+            state_transition(AtapiState::ATAPI_STATE_AWAIT_PACKET);
             break;
         default:
             logger->error("Unimplemented ATA command {:02X}", command);
@@ -373,6 +704,9 @@ static u32 ahb_read(const u32 addr) {
         case IoAddress::IO_ADDRESS_AHB_PIOCTRL:
             logger->debug("AHB_PIOCTRL read32");
             return HW_ATAPI_AHB_PIOCTRL;
+        case ATAPI_AHB_ADDR + 0x040:
+            logger->warn("Unmapped AHB read32 @ {:08X}", addr);
+            return 0;
         default:
             logger->error("Unmapped AHB read32 @ {:08X}", addr);
             exit(1);
@@ -449,6 +783,10 @@ static void ahb_write(const u32 addr, const u32 data) {
 
             HW_ATAPI_AHB_DEVSTAT = data;
             break;
+        case ATAPI_AHB_ADDR + 0x038:
+        case ATAPI_AHB_ADDR + 0x040:
+            logger->warn("Unmapped AHB write32 @ {:08X} = {:08X}", addr, data);
+            break;
         default:
             logger->error("Unmapped AHB write32 @ {:08X} = {:08X}", addr, data);
             exit(1);
@@ -492,10 +830,26 @@ static void write8(const u32 addr, const u8 data) {
             logger->debug("COMMAND write8 = {:02X}", data);
             start_ata_command(data);
             break;
-        case IoAddress::IO_ADDRESS_PKTEND:
+        case IoAddress::IO_ADDRESS_PKTEND: {
             logger->debug("PKTEND write8 = {:02X}", data);
-            start_scsi_command();
+
+            switch (state) {
+                case AtapiState::ATAPI_STATE_AWAIT_PACKET:
+                    start_scsi_command();
+                    break;
+                case AtapiState::ATAPI_STATE_AWAIT_DATA:
+                    assert(ctx.transfer_from_host);
+                    // Until we need to emulate host->device commands,
+                    // we can just raise the interrupt here
+                    clear_fifos();
+                    assert_transfer_end_interrupt();
+                    break;
+                default:
+                    logger->error("Invalid state for PACKET end {}", (int)state);
+                    exit(1);
+            }
             break;
+        }
         case IoAddress::IO_ADDRESS_DEVCTRL:
             logger->debug("DEVCTRL write8 = {:02X}", data);
 
@@ -516,6 +870,9 @@ static void write16(const u32 addr, const u16 data) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_DATA:
             logger->debug("DATA write16 = {:04X}", data);
+
+            assert(state != AtapiState::ATAPI_STATE_IDLE);
+            
             in_fifo.push(data);
             break;
         default:
@@ -542,6 +899,9 @@ void soft_reset() {
     // Set packet device signature
     HW_ATAPI_REASON.raw = 1;
     HW_ATAPI_LBA = 0xEB1401;
+
+    clear_fifos();
+    state_transition(AtapiState::ATAPI_STATE_IDLE);
 }
 
 void hard_reset() {
@@ -565,6 +925,20 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+void assert_transfer_end_interrupt() {
+    logger->info("Transfer end interrupt");
+
+    HW_ATAPI_STATUS.data_request = 0;
+    HW_ATAPI_STATUS.device_ready = 1;
+
+    set_reason(true, true);
+    
+    HW_ATAPI_STATUS.busy = 0;
+
+    assert_interrupt();
+    state_transition(AtapiState::ATAPI_STATE_IDLE);
 }
 
 // Called upon LEPTON initialization

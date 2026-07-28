@@ -16,6 +16,8 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
+void assert_transfer_end_interrupt();
+
 void umd_initialize(const int);
 
 };
