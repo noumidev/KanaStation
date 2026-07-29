@@ -14,4 +14,7 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
+void assert_audio_dma_request();
+void clear_audio_dma_request();
+
 };

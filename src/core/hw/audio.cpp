@@ -21,6 +21,7 @@
 #include <core/kanacore.hpp>
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
+#include <core/hw/dmac.hpp>
 #include <core/hw/intc.hpp>
 
 namespace kanacore::hw::audio {
@@ -85,10 +86,15 @@ static struct {
     int out_stall_count;
 } ctx;
 
+struct FifoSample {
+    u32 stereo_sample;
+    bool is_stalled;
+};
+
 static std::shared_ptr<spdlog::logger> logger;
 
-static std::queue<u32> out_fifo;
-static std::queue<u32> src_fifo;
+static std::queue<FifoSample> out_fifo;
+static std::queue<FifoSample> src_fifo;
 
 static void check_pending_interrupts() {
     if ((HW_AUDIO_INTRSTAT) != 0) {
@@ -121,44 +127,74 @@ static void clear_fifos() {
     update_fifo_status();
 }
 
-static void push_samples() {
-    while (!out_fifo.empty()) {
-        const u32 samples = out_fifo.front(); out_fifo.pop();
+static void check_audio_dma_request() {
+    if ((ctx.out_stall_count == 0) && (out_fifo.size() <= (FIFO_SIZE - 4))) {
+        dmac::assert_audio_dma_request();
+    } else {
+        dmac::clear_audio_dma_request();
     }
 }
 
 static void disable_out_channel() {
     ctx.out_stall_count = 24;
+
+    scheduler::cancel_event(scheduler::EventType::AUDIO);
+
+    check_audio_dma_request();
+
+    // Does this invalidate the FIFO..?
 }
 
-static void blah(const int) {
-    assert_interrupt(AUDIO_CHANNEL_OUT);
+static void drain_out_fifo(const int) {
+    assert(!out_fifo.empty());
 
-    push_samples();
+    // TODO: push audio samples to out
+
+    out_fifo.pop();
+
+    if (out_fifo.size() == (FIFO_SIZE / 2)) {
+        // I assume the FIFO draining to a certain capacity triggers the interrupt.
+        // Will need to write some tests...
+        assert_interrupt(AUDIO_CHANNEL_OUT);
+    }
+
     update_fifo_status();
+
+    if (!out_fifo.empty()) {
+        scheduler::schedule_event(
+            scheduler::EventType::AUDIO,
+            drain_out_fifo,
+            0,
+            scheduler::to_scheduler_cycles(44100, 1),
+            true
+        );
+    }
+
+    check_audio_dma_request();
 }
 
 static void write_out_fifo(const u32 data) {
     assert(out_fifo.size() < FIFO_SIZE);
 
+    out_fifo.push({data, ctx.out_stall_count > 0});
+
     if (ctx.out_stall_count > 0) {
         ctx.out_stall_count--;
-        return;
     }
 
-    out_fifo.push(data);
-
-    if (out_fifo.size() == FIFO_SIZE) {
+    if (out_fifo.size() == 1) {
+        // Kick off draining the FIFO
         scheduler::schedule_event(
             scheduler::EventType::AUDIO,
-            blah,
-            scheduler::to_scheduler_cycles(44100, FIFO_SIZE),
-            256,
+            drain_out_fifo,
+            0,
+            scheduler::to_scheduler_cycles(44100, 1),
             true
         );
     }
 
     update_fifo_status();
+    check_audio_dma_request();
 }
 
 static u32 read(const u32 addr) {

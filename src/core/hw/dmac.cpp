@@ -32,6 +32,9 @@ constexpr u64 DMAC_SIZE = 0x1000;
 // Not an actual DMAC base address
 constexpr u64 IO_ADDR = 0x1C000000;
 
+// For memory-to-memory flow control
+constexpr bool MEMORY_REQUEST = true;
+
 constexpr int DMAC_INTERRUPT = 22;
 
 constexpr u64 NUM_DMACS = 2;
@@ -129,16 +132,23 @@ struct Dmac {
                 u32                        : 13;
             };
         } configuration;
+
+        const bool* source_request;
+        const bool* destination_request;
     } channels[NUM_CHANNELS];
 };
 
-static struct {} ctx;
+static struct {
+    bool audio_dma_request;
+    int audio_dma_controller;
+    int audio_dma_chan;
+} ctx;
 
 std::array<Dmac, NUM_DMACS> dmacs;
 
 template<int dmac_num>
 static void check_pending_interrupts() {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
     
     Dmac* dmac = &dmacs[dmac_num];
 
@@ -153,7 +163,7 @@ static void check_pending_interrupts() {
 
 template<int dmac_num>
 static void assert_terminal_count_interrupt(const u32 channel, const bool mask) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
     
     Dmac* dmac = &dmacs[dmac_num];
 
@@ -166,12 +176,63 @@ static void assert_terminal_count_interrupt(const u32 channel, const bool mask) 
     check_pending_interrupts<dmac_num>();
 }
 
+enum Peripheral {
+    PERIPHERAL_AUDIO_OUT = 5,
+};
+
+template<int dmac_num>
+static void bind_peripheral_request(const int chan_idx, const bool** request, const u32 peripheral) {
+    static_assert(dmac_num < NUM_DMACS);
+
+    switch (peripheral) {
+        case Peripheral::PERIPHERAL_AUDIO_OUT:
+            assert((ctx.audio_dma_controller == -1) || (ctx.audio_dma_controller == dmac_num));
+            assert((ctx.audio_dma_chan == -1) || (ctx.audio_dma_chan == chan_idx));
+            *request = &ctx.audio_dma_request;
+
+            ctx.audio_dma_controller = dmac_num;
+            ctx.audio_dma_chan = chan_idx;
+            break;
+        default:
+            dmacs[dmac_num].logger->error("Unimplemented peripheral request {}", peripheral);
+            exit(1);
+    }
+}
+
+enum FlowControl {
+    FLOW_CONTROL_MEM_TO_MEM        = 0,
+    FLOW_CONTROL_MEM_TO_PERIPHERAL = 1,
+};
+
+template<int dmac_num>
+static void bind_requests(const int chan_idx) {
+    static_assert(dmac_num < NUM_DMACS);
+
+    Dmac* dmac = &dmacs[dmac_num];
+    auto* chan = &dmac->channels[chan_idx];
+
+    const u32 flow_control = HW_DMAC_CHAN_CONFIG.flow_control;
+
+    switch (flow_control) {
+        case FlowControl::FLOW_CONTROL_MEM_TO_MEM:
+            chan->source_request = chan->destination_request = &MEMORY_REQUEST;
+            break;
+        case FlowControl::FLOW_CONTROL_MEM_TO_PERIPHERAL:
+            chan->source_request = &MEMORY_REQUEST;
+            bind_peripheral_request<dmac_num>(chan_idx, &chan->destination_request, HW_DMAC_CHAN_CONFIG.destination_peripheral);
+            break;
+        default:
+            dmac->logger->error("Unimplemented flow control {}", flow_control);
+            exit(1);
+    }
+}
+
 template<int dmac_num>
 static void start_transfer(const int chan_idx);
 
 template<int dmac_num>
 static void end_transfer(const int chan_idx) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
 
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
     
@@ -203,14 +264,16 @@ static void end_transfer(const int chan_idx) {
 
 template<int dmac_num>
 static void start_transfer(const int chan_idx) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
 
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
     
     Dmac* dmac = &dmacs[dmac_num];
     auto* chan = &dmac->channels[chan_idx];
 
-    const u32 length = HW_DMAC_CHAN_CONTROL.transfer_length;
+    u32 length = HW_DMAC_CHAN_CONTROL.transfer_length;
+
+    assert(length > 0);
 
     dmac->logger->debug(
         "CHAN{} transfer (source address: {:08X}, destination address: {:08X}, length: {:03X})",
@@ -231,7 +294,7 @@ static void start_transfer(const int chan_idx) {
     const u32 source_offset = HW_DMAC_CHAN_CONTROL.source_increment ? 4 : 0;
     const u32 destination_offset = HW_DMAC_CHAN_CONTROL.destination_increment ? 4 : 0;
 
-    for (u32 i = 0; i < length; i++) {
+    while ((length > 0) && *chan->source_request && *chan->destination_request) {
         // Single 32-bit beat
         // Later on, we could emulate AHB bursts
         const u32 source_addr = HW_DMAC_CHAN_SRCADDR & ADDR_MASK;
@@ -241,19 +304,32 @@ static void start_transfer(const int chan_idx) {
 
         HW_DMAC_CHAN_SRCADDR += source_offset;
         HW_DMAC_CHAN_DSTADDR += destination_offset;
+
+        length--;
     }
 
-    scheduler::schedule_event(
-        scheduler::EventType::DMAC_DMA,
-        end_transfer<dmac_num>,
-        chan_idx,
-        32 * length
-    );
+    if (length == 0) {
+        scheduler::schedule_event(
+            scheduler::EventType::DMAC_DMA,
+            end_transfer<dmac_num>,
+            chan_idx,
+            16 * HW_DMAC_CHAN_CONTROL.transfer_length
+        );
+
+        // I have no good way to emulate this without implementing proper
+        // DMA FIFOs, so having this bit go high while an interrupt
+        // is in-flight seems decent enough
+        HW_DMAC_CHAN_CONFIG.active = 1;
+    } else {
+        HW_DMAC_CHAN_CONFIG.active = 0;
+    }
+
+    HW_DMAC_CHAN_CONTROL.transfer_length = length;
 }
 
 template<int dmac_num>
 static u32 read(const u32 addr) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
     
     Dmac* dmac = &dmacs[dmac_num];
 
@@ -304,15 +380,18 @@ static u32 read(const u32 addr) {
 
 template<int dmac_num>
 static void set_chan_config(const int chan_idx, const u32 data) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
 
     auto* chan = &dmacs[dmac_num].channels[chan_idx];
 
+    assert(!HW_DMAC_CHAN_CONFIG.active);
+
     const bool is_enabled = HW_DMAC_CHAN_CONFIG.channel_enable;
 
-    assert(!is_enabled);
-
     HW_DMAC_CHAN_CONFIG.raw = data;
+
+    // Binds new src/dst DMA requests to the channel
+    bind_requests<dmac_num>(chan_idx);
 
     if (!is_enabled && HW_DMAC_CHAN_CONFIG.channel_enable) {
         start_transfer<dmac_num>(chan_idx);
@@ -321,7 +400,7 @@ static void set_chan_config(const int chan_idx, const u32 data) {
 
 template<int dmac_num>
 static void write(const u32 addr, const u32 data) {
-    static_assert(dmac_num< NUM_DMACS);
+    static_assert(dmac_num < NUM_DMACS);
     
     Dmac* dmac = &dmacs[dmac_num];
 
@@ -417,16 +496,44 @@ void initialize() {
 }
 
 void soft_reset() {
-    
+    ctx.audio_dma_controller = -1;
+    ctx.audio_dma_chan = -1;
 }
 
 void hard_reset() {
     map<0>(DMAC0_ADDR);
     map<1>(DMAC1_ADDR);
+
+    soft_reset();
 }
 
 void shutdown() {
 
+}
+
+void assert_audio_dma_request() {
+    const bool old_request = ctx.audio_dma_request;
+
+    ctx.audio_dma_request = true;
+
+    if (!old_request && (ctx.audio_dma_controller != -1) && (ctx.audio_dma_chan != -1)) {
+        Dmac* dmac = &dmacs[ctx.audio_dma_controller];
+        auto* chan = &dmac->channels[ctx.audio_dma_chan];
+
+        if (!chan->configuration.channel_enable) {
+            return;
+        }
+    
+        if (ctx.audio_dma_controller == 0) {
+            start_transfer<0>(ctx.audio_dma_chan);
+        } else if (ctx.audio_dma_controller == 1) {
+            start_transfer<1>(ctx.audio_dma_chan);
+        }
+    }
+}
+
+void clear_audio_dma_request() {
+    ctx.audio_dma_request = false;
 }
 
 };
