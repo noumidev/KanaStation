@@ -3,15 +3,16 @@
  * Copyright (C) 2026  noumidev
  */
 
-/* core/hw/i2c.cpp - I2C controller */
+/* core/hw/i2c/i2c.cpp - I2C controller */
 
-#include <core/hw/i2c.hpp>
+#include <core/hw/i2c/i2c.hpp>
 
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <queue>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -20,6 +21,7 @@
 #include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
+#include <core/hw/i2c/clockgen.hpp>
 
 namespace kanacore::hw::i2c {
 
@@ -65,6 +67,9 @@ static struct {
 
     u32 length;
     u32 interrupt_status;
+
+    std::vector<u8> (*transmit)(const u8);
+    void (*receive)(const std::vector<u8>&);
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -80,21 +85,50 @@ static void end_transmission_reception(const int) {
     intc::assert_sc_interrupt(I2C_INTERRUPT);
 }
 
+static void push_in_params(const std::vector<u8> data) {
+    for (u64 i = 0; i < data.size(); i++) {
+        receive_fifo.push(data[i]);
+    }
+}
+
+static std::vector<u8> get_out_params() {
+    std::vector<u8> out_params;
+
+    while (!transmit_fifo.empty()) {
+        out_params.push_back(transmit_fifo.front());
+        transmit_fifo.pop();
+    }
+
+    return out_params;
+}
+
+static void bind_device(const u8 device_addr) {
+    switch (device_addr) {
+        case DeviceAddress::DEVICE_ADDRESS_CLOCKGEN:
+            ctx.transmit = clockgen::transmit;
+            ctx.receive  = clockgen::receive;
+            break;
+        default:
+            logger->error("Unimplemented device (address: {:02X})", device_addr);
+            exit(1);
+    }
+}
+
 static void start_transmission() {
     assert(!transmit_fifo.empty());
 
+    // TX sets the device address? That would explain TX with length = 0,
+    // that only sets the address...
+    const u8 device_addr = transmit_fifo.front() >> 1; transmit_fifo.pop();
+
+    logger->debug("Device address: {:02X}", device_addr);
+
+    bind_device(device_addr);
+
     if (HW_I2C_LENGTH > 0) {
-        const u8 addr = transmit_fifo.front() >> 1; transmit_fifo.pop();
-
-        logger->debug("Starting transmission (device address = {:02X})", addr);
-
-        // TODO: implement I2C transfer
-        for (u32 i = 0; i < HW_I2C_LENGTH; i++) {
-            transmit_fifo.pop();
-        }
-    } else {
-        // I think this shouldn't *actually* happen, needs investigation
-        logger->warn("Transmission length is 0");
+        logger->debug("Starting transmission");
+        
+        ctx.receive(get_out_params());
     }
     
     scheduler::schedule_event(
@@ -106,18 +140,11 @@ static void start_transmission() {
 }
 
 static void start_reception() {
-    assert(!transmit_fifo.empty());
+    assert(ctx.transmit != nullptr);
 
-    const u8 addr = transmit_fifo.front() >> 1; transmit_fifo.pop();
+    logger->debug("Starting reception");
 
-    logger->debug("Starting reception (device address = {:02X})", addr);
-
-    // TODO: implement I2C transfer
-    receive_fifo.push(addr << 1 | 1);
-
-    for (u32 i = 0; i < HW_I2C_LENGTH; i++) {
-        receive_fifo.push(0xFF);
-    }
+    push_in_params(ctx.transmit(HW_I2C_LENGTH));
 
     scheduler::schedule_event(
         scheduler::EventType::I2C,
@@ -237,10 +264,12 @@ void initialize() {
     logger = spdlog::stdout_color_st("I2C");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    clockgen::initialize();
 }
 
 void soft_reset() {
-    
+    clockgen::soft_reset();
 }
 
 void hard_reset() {
@@ -251,10 +280,12 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(I2C_ADDR, I2C_SIZE, page_desc);
+
+    clockgen::hard_reset();
 }
 
 void shutdown() {
-
+    clockgen::shutdown();
 }
 
 };

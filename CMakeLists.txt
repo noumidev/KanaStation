@@ -41,7 +41,6 @@ set(SOURCES
     src/core/hw/dmac.cpp
     src/core/hw/dmacplus.cpp
     src/core/hw/gpio.cpp
-    src/core/hw/i2c.cpp
     src/core/hw/intc.cpp
     src/core/hw/kirk.cpp
     src/core/hw/ms.cpp
@@ -58,6 +57,8 @@ set(SOURCES
     src/core/hw/ge/edram.cpp
     src/core/hw/ge/ge.cpp
     src/core/hw/ge/rasterizer.cpp
+    src/core/hw/i2c/clockgen.cpp
+    src/core/hw/i2c/i2c.cpp
     src/core/hw/me/scratchpad.cpp
     src/core/hw/me/vme_dmac.cpp
     src/core/hw/uart/uart.cpp
@@ -79,7 +80,6 @@ set(HEADERS
     include/core/hw/dmac.hpp
     include/core/hw/dmacplus.hpp
     include/core/hw/gpio.hpp
-    include/core/hw/i2c.hpp
     include/core/hw/intc.hpp
     include/core/hw/kirk.hpp
     include/core/hw/ms.hpp
@@ -96,6 +96,8 @@ set(HEADERS
     include/core/hw/ge/edram.hpp
     include/core/hw/ge/ge.hpp
     include/core/hw/ge/rasterizer.hpp
+    include/core/hw/i2c/clockgen.hpp
+    include/core/hw/i2c/i2c.hpp
     include/core/hw/me/scratchpad.hpp
     include/core/hw/me/vme_dmac.hpp
     include/core/hw/uart/uart.hpp

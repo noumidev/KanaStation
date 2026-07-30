@@ -24,7 +24,6 @@
 #include <core/hw/dmac.hpp>
 #include <core/hw/dmacplus.hpp>
 #include <core/hw/gpio.hpp>
-#include <core/hw/i2c.hpp>
 #include <core/hw/intc.hpp>
 #include <core/hw/kirk.hpp>
 #include <core/hw/ms.hpp>
@@ -40,6 +39,7 @@
 #include <core/hw/ge/edram.hpp>
 #include <core/hw/ge/ge.hpp>
 #include <core/hw/ge/rasterizer.hpp>
+#include <core/hw/i2c/i2c.hpp>
 #include <core/hw/me/scratchpad.hpp>
 #include <core/hw/me/vme_dmac.hpp>
 #include <core/hw/uart/uart.hpp>
