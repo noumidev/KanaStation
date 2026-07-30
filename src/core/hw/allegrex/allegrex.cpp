@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cmath>
+#include <unordered_set>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 
@@ -137,12 +138,20 @@ void Allegrex::dump_state() {
 }
 
 void Allegrex::jump(u32 target) {
-    if constexpr (!SILENT_JUMPS) logger->debug("Jump @ {:08X} to {:08X}", instr_addr, target);
+    static std::unordered_set<u32> jump_targets;
 
     // ALLEGREX doesn't actually seem to throw exceptions on unaligned accesses.
     // The firmware deliberately sets the KIRK interrupt handler to an unaligned
     // address, so let's just align PC
     target &= ~3;
+
+    if constexpr (!SILENT_JUMPS) {
+        if (jump_targets.find(target) == jump_targets.end()) {
+            logger->info("Jump @ {:08X} to {:08X}", instr_addr, target);
+
+            jump_targets.insert(target);
+        }
+    }
 
     regfile.pc = target;
     regfile.next_pc = target + sizeof(u32);
@@ -151,10 +160,18 @@ void Allegrex::jump(u32 target) {
 }
 
 void Allegrex::delayed_jump( u32 target) {
-    if constexpr (!SILENT_JUMPS) logger->debug("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
+    static std::unordered_set<u32> delayed_targets;
 
     // See above
     target &= ~3;
+
+    if constexpr (!SILENT_JUMPS) {
+        if (delayed_targets.find(target) == delayed_targets.end()) {
+            logger->info("Delayed jump @ {:08X} to {:08X}", instr_addr, target);
+
+            delayed_targets.insert(target);
+        }
+    }
 
     regfile.next_pc = target;
 }
@@ -399,6 +416,9 @@ void Allegrex::wait_for_interrupt() {
     cycles = target_timestamp;
 
     state = CpuState::WaitForInterrupt;
+
+    // HALTing with the interrupt enable bit turned off forces it on, probably
+    status_set_ic(1);
 }
 
 void Allegrex::assert_interrupt() {

@@ -76,8 +76,9 @@ struct Cp0 {
     };
 
     enum ExceptionCode {
-        EXCEPTION_CODE_INTERRUPT = 0x00,
-        EXCEPTION_CODE_SYSCALL   = 0x08,
+        EXCEPTION_CODE_INTERRUPT    = 0x00,
+        EXCEPTION_CODE_SYSCALL      = 0x08,
+        EXCEPTION_CODE_COP_UNUSABLE = 0x0B,
     };
 
     // 2^(12 + 2) = 16 KB
@@ -270,13 +271,21 @@ public:
         load_linked = is_load_linked;
     }
 
-    inline bool is_coprocessor_usable(const int idx) const {
+    inline bool is_coprocessor_usable(const int idx) {
         // Force CP0 to be usable for now
         if (idx == 0) {
             return true;
         }
 
-        return (cp0.status.coprocessor_usable & (1 << idx)) != 0;
+        if ((cp0.status.coprocessor_usable & (1 << idx)) == 0) {
+            cp0.cause.coprocessor_error = idx;
+
+            raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_COP_UNUSABLE);
+
+            return false;
+        }
+
+        return true;
     }
 
     // FPU handlers (control registers, FGRs)
