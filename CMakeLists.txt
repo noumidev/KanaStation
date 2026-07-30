@@ -58,6 +58,7 @@ set(SOURCES
     src/core/hw/ge/ge.cpp
     src/core/hw/ge/rasterizer.cpp
     src/core/hw/i2c/clockgen.cpp
+    src/core/hw/i2c/codec.cpp
     src/core/hw/i2c/i2c.cpp
     src/core/hw/me/scratchpad.cpp
     src/core/hw/me/vme_dmac.cpp
@@ -97,6 +98,7 @@ set(HEADERS
     include/core/hw/ge/ge.hpp
     include/core/hw/ge/rasterizer.hpp
     include/core/hw/i2c/clockgen.hpp
+    include/core/hw/i2c/codec.hpp
     include/core/hw/i2c/i2c.hpp
     include/core/hw/me/scratchpad.hpp
     include/core/hw/me/vme_dmac.hpp

@@ -22,6 +22,7 @@
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
 #include <core/hw/i2c/clockgen.hpp>
+#include <core/hw/i2c/codec.hpp>
 
 namespace kanacore::hw::i2c {
 
@@ -50,6 +51,7 @@ enum TransferDirection {
 };
 
 enum DeviceAddress {
+    DEVICE_ADDRESS_CODEC    = 0x1A,
     DEVICE_ADDRESS_CLOCKGEN = 0x69,
 };
 
@@ -104,6 +106,10 @@ static std::vector<u8> get_out_params() {
 
 static void bind_device(const u8 device_addr) {
     switch (device_addr) {
+        case DeviceAddress::DEVICE_ADDRESS_CODEC:
+            ctx.transmit = codec::transmit;
+            ctx.receive  = codec::receive;
+            break;
         case DeviceAddress::DEVICE_ADDRESS_CLOCKGEN:
             ctx.transmit = clockgen::transmit;
             ctx.receive  = clockgen::receive;
@@ -266,10 +272,12 @@ void initialize() {
     std::memset(&ctx, 0, sizeof(ctx));
 
     clockgen::initialize();
+    codec::initialize();
 }
 
 void soft_reset() {
     clockgen::soft_reset();
+    codec::soft_reset();
 }
 
 void hard_reset() {
@@ -282,10 +290,12 @@ void hard_reset() {
     kanacore::get_sc_bus_ptr()->map(I2C_ADDR, I2C_SIZE, page_desc);
 
     clockgen::hard_reset();
+    codec::hard_reset();
 }
 
 void shutdown() {
     clockgen::shutdown();
+    codec::shutdown();
 }
 
 };
