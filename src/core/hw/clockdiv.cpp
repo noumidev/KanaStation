@@ -31,8 +31,8 @@ enum IoAddress {
     IO_ADDRESS_BUSDIV = CLOCKDIV_ADDR + 0x004,
 };
 
-#define HW_CLOCKDIV_CPUDIV ctx.cpu_divider
-#define HW_CLOCKDIV_BUSDIV ctx.bus_divider
+#define HW_CLOCKDIV_CPUDIV ctx[cpu_num].cpu_divider
+#define HW_CLOCKDIV_BUSDIV ctx[cpu_num].bus_divider
 
 static struct {
     union {
@@ -43,63 +43,85 @@ static struct {
             u16 numerator;
         };
     } cpu_divider, bus_divider;
-} ctx;
 
-static std::shared_ptr<spdlog::logger> logger;
+    std::shared_ptr<spdlog::logger> logger;
+} ctx[2];
 
+template<int cpu_num>
 static u32 read(const u32 addr) {
+    assert(cpu_num < 2);
+
+    auto& clockdiv = ctx[cpu_num];
+
     switch (addr) {
         case IoAddress::IO_ADDRESS_CPUDIV:
-            logger->debug("CPUDIV read32");
+            clockdiv.logger->debug("CPUDIV read32");
             return HW_CLOCKDIV_CPUDIV.raw;
         case IoAddress::IO_ADDRESS_BUSDIV:
-            logger->debug("BUSDIV read32");
+            clockdiv.logger->debug("BUSDIV read32");
             return HW_CLOCKDIV_BUSDIV.raw;
         default:
-            logger->error("Unmapped read32 @ {:08X}", addr);
+            clockdiv.logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
     }
 }
 
+template<int cpu_num>
 static void write(const u32 addr, const u32 data) {
+    assert(cpu_num < 2);
+
+    auto& clockdiv = ctx[cpu_num];
+
     switch (addr) {
         case IoAddress::IO_ADDRESS_CPUDIV:
-            logger->debug("CPUDIV write32 = {:08X}", data);
+            clockdiv.logger->debug("CPUDIV write32 = {:08X}", data);
 
             HW_CLOCKDIV_CPUDIV.raw = data & 0x01FF01FF;
             break;
         case IoAddress::IO_ADDRESS_BUSDIV:
-            logger->debug("BUSDIV write32 = {:08X}", data);
+            clockdiv.logger->debug("BUSDIV write32 = {:08X}", data);
 
             HW_CLOCKDIV_BUSDIV.raw = data & 0x01FF01FF;
             break;
         default:
-            logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
+            clockdiv.logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             exit(1);
     }
 }
 
 void initialize() {
-    logger = spdlog::stdout_color_st("CLOCKDIV");
-
-    std::memset(&ctx, 0, sizeof(ctx));
+    ctx[0].logger = spdlog::stdout_color_st("CLOCKDIV");
+    ctx[1].logger = spdlog::stdout_color_st("ME CLOCKDIV");
 }
 
-void soft_reset() {
+template<int cpu_num>
+void soft_reset_impl() {
+    assert(cpu_num < 2);
+
     HW_CLOCKDIV_CPUDIV.denominator = 0x1FF;
     HW_CLOCKDIV_CPUDIV.numerator   = 0x1FF;
     HW_CLOCKDIV_BUSDIV.denominator = 0x1FF;
     HW_CLOCKDIV_BUSDIV.numerator   = 0x1FF;
 }
 
+void soft_reset() {
+    soft_reset_impl<0>();
+    soft_reset_impl<1>();
+}
+
 void hard_reset() {
-    const bus::PageDescriptor page_desc {
-        .read32_func  = read,
-        .write32_func = write,
+    const bus::PageDescriptor page_desc_sc {
+        .read32_func  = read<0>,
+        .write32_func = write<0>,
     };
 
-    // TODO: ME has clockdiv registers too
-    kanacore::get_sc_bus_ptr()->map(CLOCKDIV_ADDR, CLOCKDIV_SIZE, page_desc);
+    const bus::PageDescriptor page_desc_me {
+        .read32_func  = read<1>,
+        .write32_func = write<1>,
+    };
+
+    kanacore::get_sc_bus_ptr()->map(CLOCKDIV_ADDR, CLOCKDIV_SIZE, page_desc_sc);
+    kanacore::get_me_bus_ptr()->map(CLOCKDIV_ADDR, CLOCKDIV_SIZE, page_desc_me);
 
     soft_reset();
 }
