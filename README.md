@@ -25,6 +25,9 @@ cmake .. -DCRYPTOPP_BUILD_TESTING=OFF
 make
 ```
 
+## AI policy
+None of the code in this repository was written using AI, and I would like to keep it that way. I will not accept any contributions that were AI-assisted.
+
 ## Screenshots
 <img width="592" height="416" alt="image" src="https://github.com/user-attachments/assets/2c9aed89-b0f8-4c8c-8cdc-d6cf47abc260" />
 <img width="592" height="416" alt="image" src="https://github.com/user-attachments/assets/6686b226-9708-4292-b0c1-f0bec50beef0" />
