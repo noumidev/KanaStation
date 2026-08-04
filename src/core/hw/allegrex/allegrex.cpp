@@ -119,10 +119,6 @@ void Allegrex::write(const u32 addr, const T data) {
     // TODO: properly handle memory segments
     const u32 masked_addr = addr & 0x1FFFFFFF;
 
-    if ((cpu_id == CpuId::CPU_ID_ME) && (masked_addr == 0x1C100044) && ((data & 1) != 0)) {
-        intc::assert_sc_interrupt(31);
-    }
-
     bus.write<T>(masked_addr, data);
 }
 

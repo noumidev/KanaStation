@@ -61,6 +61,7 @@ set(SOURCES
     src/core/hw/i2c/codec.cpp
     src/core/hw/i2c/i2c.cpp
     src/core/hw/me/scratchpad.cpp
+    src/core/hw/me/sysctrl.cpp
     src/core/hw/me/vme_dmac.cpp
     src/core/hw/uart/uart.cpp
     src/frontends/sdl/main.cpp
@@ -101,6 +102,7 @@ set(HEADERS
     include/core/hw/i2c/codec.hpp
     include/core/hw/i2c/i2c.hpp
     include/core/hw/me/scratchpad.hpp
+    include/core/hw/me/sysctrl.hpp
     include/core/hw/me/vme_dmac.hpp
     include/core/hw/uart/uart.hpp
 )
