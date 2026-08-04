@@ -49,16 +49,17 @@ struct Cp0 {
     };
 
     enum StatusRegister {
-        STATUS_REGISTER_COUNT  = 0x09,
-        STATUS_REGISTER_STATUS = 0x0C,
-        STATUS_REGISTER_CAUSE  = 0x0D,
-        STATUS_REGISTER_EPC    = 0x0E,
-        STATUS_REGISTER_CONFIG = 0x10,
-        STATUS_REGISTER_SCCODE = 0x15,
-        STATUS_REGISTER_CPUID  = 0x16,
-        STATUS_REGISTER_EBASE  = 0x19,
-        STATUS_REGISTER_TAGLO  = 0x1C,
-        STATUS_REGISTER_TAGHI  = 0x1D,
+        STATUS_REGISTER_COUNT   = 0x09,
+        STATUS_REGISTER_COMPARE = 0x0B,
+        STATUS_REGISTER_STATUS  = 0x0C,
+        STATUS_REGISTER_CAUSE   = 0x0D,
+        STATUS_REGISTER_EPC     = 0x0E,
+        STATUS_REGISTER_CONFIG  = 0x10,
+        STATUS_REGISTER_SCCODE  = 0x15,
+        STATUS_REGISTER_CPUID   = 0x16,
+        STATUS_REGISTER_EBASE   = 0x19,
+        STATUS_REGISTER_TAGLO   = 0x1C,
+        STATUS_REGISTER_TAGHI   = 0x1D,
     };
 
 
@@ -124,6 +125,7 @@ struct Cp0 {
         };
     } cause;
 
+    common::u32 compare;
     common::u32 count;
     common::u32 epc;
     common::u32 sccode;
@@ -187,6 +189,11 @@ private:
     } state;
 
     bool is_interrupt_pending() const;
+
+    common::u32 get_count() const;
+
+    void clear_count_interrupt();
+    void reschedule_count();
 
 public:
     Allegrex(const CpuId cpu_id);
@@ -261,6 +268,7 @@ public:
     void set_syscall_code(const common::u32 sccode);
     void wait_for_interrupt();
     void assert_interrupt();
+    void assert_count_interrupt();
     void clear_interrupt();
 
     inline bool is_load_linked() const {

@@ -45,6 +45,8 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "DMACplus DMA",
     "Audio",
     "SysTime",
+    "Count (SC)",
+    "Count (ME)",
     "VSYNC",
 };
 

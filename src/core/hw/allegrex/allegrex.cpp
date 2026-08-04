@@ -14,6 +14,8 @@
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <core/kanacore.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
 
@@ -24,6 +26,13 @@ using namespace common;
 constexpr bool SILENT_JUMPS = true;
 
 constexpr u32 BOOT_EXCEPTION_ADDR = 0xBFC00000;
+
+// A little hacky, but it should be fine
+static void assert_count_interrupt_impl(const int cpu_id) {
+    Allegrex* cpu = (cpu_id == CpuId::CPU_ID_SC) ? kanacore::get_sc_ptr() : kanacore::get_me_ptr();
+
+    cpu->assert_count_interrupt();
+}
 
 Allegrex::Allegrex(const CpuId cpu_id) : cpu_id(cpu_id), bus(cpu_id == CPU_ID_SC ? "Bus" : "ME Bus") {
     logger = spdlog::stdout_color_st(cpu_id == CPU_ID_SC ? "SC" : "ME");
@@ -47,6 +56,40 @@ bool Allegrex::is_interrupt_pending() const {
         !cp0.status.exception_level &&
         !cp0.status.error_level &&
         ((cp0.status.interrupt_mask & cp0.cause.interrupt_flags) != 0);
+}
+
+u32 Allegrex::get_count() const {
+    return cp0.count + (cycles - cp0.count_timestamp);
+}
+
+void Allegrex::assert_count_interrupt() {
+    cp0.cause.interrupt_flags |= 1 << 7;
+
+    if (is_interrupt_pending()) {
+        raise_lv1_exception(Cp0::ExceptionCode::EXCEPTION_CODE_INTERRUPT);
+    }
+}
+
+void Allegrex::reschedule_count() {
+    if (cp0.compare > get_count()) {
+        const int cpu_id = get_cpu_id();
+
+        scheduler::schedule_event(
+            (cpu_id == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME,
+            assert_count_interrupt_impl,
+            cpu_id,
+            cp0.compare - get_count(),
+            true
+        );
+    }
+}
+
+void Allegrex::clear_count_interrupt() {
+    cp0.cause.interrupt_flags &= ~(1 << 7);
+}
+
+void reschedule_count() {
+
 }
 
 template<typename T>
@@ -95,6 +138,10 @@ void Allegrex::soft_reset() {
     cp0.status.software_reset = 1;
 
     jump(BOOT_EXCEPTION_ADDR);
+
+    scheduler::cancel_event(
+        (get_cpu_id() == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME
+    );
 }
 
 void Allegrex::hard_reset() {
@@ -107,6 +154,10 @@ void Allegrex::hard_reset() {
     cp0.status.software_reset = 0;
 
     jump(BOOT_EXCEPTION_ADDR);
+
+    scheduler::cancel_event(
+        (get_cpu_id() == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME
+    );
 }
 
 void Allegrex::dump_state() {
@@ -236,7 +287,10 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
 
     switch (idx) {
         case Cp0::StatusRegister::STATUS_REGISTER_COUNT:
-            data = cp0.count + (cycles - cp0.count_timestamp);
+            data = get_count();
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_COMPARE:
+            data = cp0.compare;
             break;
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             data = cp0.status.raw;
@@ -280,8 +334,15 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
     switch (idx) {
         case Cp0::StatusRegister::STATUS_REGISTER_COUNT:
             cp0.count = data;
-
             cp0.count_timestamp = cycles;
+
+            reschedule_count();
+            break;
+        case Cp0::StatusRegister::STATUS_REGISTER_COMPARE:
+            cp0.compare = data;
+
+            reschedule_count();
+            clear_count_interrupt();
             break;
         case Cp0::StatusRegister::STATUS_REGISTER_STATUS:
             cp0.status.raw = data;

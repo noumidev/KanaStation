@@ -35,6 +35,8 @@ enum EventType {
     DMACPLUS_DMA,
     AUDIO,
     SYSTIME,
+    COUNT_SC,
+    COUNT_ME,
     VSYNC,
     NUM_EVENT_TYPES,
 };
