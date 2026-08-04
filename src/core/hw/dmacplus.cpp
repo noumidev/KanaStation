@@ -49,6 +49,16 @@ enum IoAddress {
     IO_ADDRESS_LCDC_FBCTRL    = DMACPLUS_ADDR + 0x110,
     IO_ADDRESS_CSC_Y0ADDR     = DMACPLUS_ADDR + 0x120,
     IO_ADDRESS_CSC_START      = DMACPLUS_ADDR + 0x160,
+    IO_ADDRESS_SC2ME_SRCADDR  = DMACPLUS_ADDR + 0x180,
+    IO_ADDRESS_SC2ME_DSTADDR  = DMACPLUS_ADDR + 0x184,
+    IO_ADDRESS_SC2ME_LINKADDR = DMACPLUS_ADDR + 0x188,
+    IO_ADDRESS_SC2ME_CONTROL  = DMACPLUS_ADDR + 0x18C,
+    IO_ADDRESS_SC2ME_CONFIG   = DMACPLUS_ADDR + 0x190,
+    IO_ADDRESS_ME2SC_SRCADDR  = DMACPLUS_ADDR + 0x1A0,
+    IO_ADDRESS_ME2SC_DSTADDR  = DMACPLUS_ADDR + 0x1A4,
+    IO_ADDRESS_ME2SC_LINKADDR = DMACPLUS_ADDR + 0x1A8,
+    IO_ADDRESS_ME2SC_CONTROL  = DMACPLUS_ADDR + 0x1AC,
+    IO_ADDRESS_ME2SC_CONFIG   = DMACPLUS_ADDR + 0x1B0,
     IO_ADDRESS_SC128_SRCADDR  = DMACPLUS_ADDR + 0x1C0,
     IO_ADDRESS_SC128_DSTADDR  = DMACPLUS_ADDR + 0x1C4,
     IO_ADDRESS_SC128_LINKADDR = DMACPLUS_ADDR + 0x1C8,
@@ -66,6 +76,16 @@ enum IoAddress {
 #define HW_DMACPLUS_LCDC_FBWIDTH   ctx.framebuffer_width
 #define HW_DMACPLUS_LCDC_FBSTRIDE  ctx.framebuffer_stride
 #define HW_DMACPLUS_LCDC_FBCTRL    ctx.framebuffer_control
+#define HW_DMACPLUS_SC2ME_SRCADDR  channels[0].source_addr
+#define HW_DMACPLUS_SC2ME_DSTADDR  channels[0].destination_addr
+#define HW_DMACPLUS_SC2ME_LINKADDR channels[0].link_addr
+#define HW_DMACPLUS_SC2ME_CONTROL  channels[0].control
+#define HW_DMACPLUS_SC2ME_CONFIG   channels[0].configuration
+#define HW_DMACPLUS_ME2SC_SRCADDR  channels[1].source_addr
+#define HW_DMACPLUS_ME2SC_DSTADDR  channels[1].destination_addr
+#define HW_DMACPLUS_ME2SC_LINKADDR channels[1].link_addr
+#define HW_DMACPLUS_ME2SC_CONTROL  channels[1].control
+#define HW_DMACPLUS_ME2SC_CONFIG   channels[1].configuration
 #define HW_DMACPLUS_SC128_SRCADDR  channels[2].source_addr
 #define HW_DMACPLUS_SC128_DSTADDR  channels[2].destination_addr
 #define HW_DMACPLUS_SC128_LINKADDR channels[2].link_addr
@@ -116,6 +136,9 @@ static struct {
             u32                        : 13;
         };
     } configuration;
+
+    bus::Bus* src_bus;
+    bus::Bus* dst_bus;
 } channels[NUM_CHANNELS];
 
 static struct {
@@ -162,77 +185,83 @@ static void assert_terminal_count_interrupt(const u32 channel, const bool mask) 
     check_pending_interrupts();
 }
 
-static void start_sc128_transfer();
+static void start_transfer(const int chan_id);
 
-static void end_sc128_transfer(const int) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
+static void end_transfer(const int chan_id) {
+    auto& chan = channels[chan_id];
 
-    if (HW_DMACPLUS_SC128_CONTROL.interrupt_enable) {
-        assert_terminal_count_interrupt(4, HW_DMACPLUS_SC128_CONFIG.interrupt_mask);
+    if (chan.control.interrupt_enable) {
+        assert_terminal_count_interrupt(chan_id + 2, chan.configuration.interrupt_mask);
     }
 
-    if (HW_DMACPLUS_SC128_LINKADDR != 0) {
+    if (chan.link_addr != 0) {
         // Scatter/gather
-        const u32 link_addr = HW_DMACPLUS_SC128_LINKADDR;
+        const u32 link_addr = chan.link_addr;
 
-        HW_DMACPLUS_SC128_SRCADDR  = bus->read<u32>(link_addr + 0x0);
-        HW_DMACPLUS_SC128_DSTADDR  = bus->read<u32>(link_addr + 0x4);
-        HW_DMACPLUS_SC128_LINKADDR = bus->read<u32>(link_addr + 0x8);
-        HW_DMACPLUS_SC128_CONTROL.raw = bus->read<u32>(link_addr + 0xC);
+        chan.source_addr = chan.src_bus->read<u32>(link_addr + 0x0);
+        chan.destination_addr = chan.src_bus->read<u32>(link_addr + 0x4);
+        chan.link_addr   = chan.src_bus->read<u32>(link_addr + 0x8);
+        chan.control.raw = chan.src_bus->read<u32>(link_addr + 0xC);
 
-        if (HW_DMACPLUS_SC128_CONTROL.transfer_length > 0) {
-            start_sc128_transfer();
+        if (chan.control.transfer_length > 0) {
+            start_transfer(chan_id);
         }
     } else {
-        HW_DMACPLUS_SC128_CONTROL.transfer_length = 0;
-        HW_DMACPLUS_SC128_CONFIG.active = 0;
-        HW_DMACPLUS_SC128_CONFIG.channel_enable = 0;
+        chan.control.transfer_length = 0;
+        chan.configuration.active = 0;
+        chan.configuration.channel_enable = 0;
     }
 }
 
-static void start_sc128_transfer() {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
+static void start_transfer(const int chan_id) {
+    static constexpr const char* CHANNEL_NAMES[] = {
+        "SC2ME", "ME2SC", "SC128",
+    };
 
-    const u32 length = HW_DMACPLUS_SC128_CONTROL.transfer_length;
+    auto& chan = channels[chan_id];
+    const u32 length = chan.control.transfer_length;
 
     logger->debug(
-        "SC128 transfer (source address: {:08X}, destination address: {:08X}, length: {:03X})",
-        HW_DMACPLUS_SC128_SRCADDR,
-        HW_DMACPLUS_SC128_DSTADDR,
+        "{} transfer (source address: {:08X}, destination address: {:08X}, length: {:03X})",
+        CHANNEL_NAMES[chan_id],
+        chan.source_addr,
+        chan.destination_addr,
         length
     );
 
     // Sanity checks
-
     // Memory to memory
-    assert(HW_DMACPLUS_SC128_CONFIG.flow_control == 0);
+    assert(chan.configuration.flow_control == 0);
     // Transfer width is 128-bit
-    assert(HW_DMACPLUS_SC128_CONTROL.source_width == 4);
-    assert(HW_DMACPLUS_SC128_CONTROL.destination_width == 4);
-    // Increment addresses
-    assert(HW_DMACPLUS_SC128_CONTROL.source_increment);
-    assert(HW_DMACPLUS_SC128_CONTROL.destination_increment);
+    assert(chan.control.source_width == 4);
+    assert(chan.control.destination_width == 4);
+
+    const u32 src_offset = chan.control.source_increment ? 4 : 0;
+    const u32 dst_offset = chan.control.destination_increment ? 4 : 0;
 
     for (u32 i = 0; i < length; i++) {
-        // One 128-bit beat
-        const u32 source_addr = HW_DMACPLUS_SC128_SRCADDR & ADDR_MASK;
-        const u32 destination_addr = HW_DMACPLUS_SC128_DSTADDR & ADDR_MASK;
+        const u32 src_addr = chan.source_addr & ADDR_MASK;
+        const u32 dst_addr = chan.destination_addr & ADDR_MASK;
 
-        bus->write<u32>(destination_addr + 0x0, bus->read<u32>(source_addr + 0x0));
-        bus->write<u32>(destination_addr + 0x4, bus->read<u32>(source_addr + 0x4));
-        bus->write<u32>(destination_addr + 0x8, bus->read<u32>(source_addr + 0x8));
-        bus->write<u32>(destination_addr + 0xC, bus->read<u32>(source_addr + 0xC));
+        assert(((src_addr & 0xF) == 0) && ((dst_addr & 0xF) == 0));
 
-        HW_DMACPLUS_SC128_SRCADDR += 16;
-        HW_DMACPLUS_SC128_DSTADDR += 16;
+        chan.dst_bus->write<u32>(dst_addr + 0 * dst_offset, chan.src_bus->read<u32>(src_addr + 0 * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + 1 * dst_offset, chan.src_bus->read<u32>(src_addr + 1 * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + 2 * dst_offset, chan.src_bus->read<u32>(src_addr + 2 * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + 3 * dst_offset, chan.src_bus->read<u32>(src_addr + 3 * src_offset));
+
+        chan.source_addr += 4 * src_offset;
+        chan.destination_addr += 4 * dst_offset;
     }
 
     scheduler::schedule_event(
         scheduler::EventType::DMACPLUS_DMA,
-        end_sc128_transfer,
-        0,
+        end_transfer,
+        chan_id,
         32 * length
     );
+
+    chan.configuration.active = 1;
 }
 
 static u32 read(const u32 addr) {
@@ -269,15 +298,17 @@ static u32 read(const u32 addr) {
     }
 }
 
-static void set_sc128_config(const u32 data) {
-    const bool is_enabled = HW_DMACPLUS_SC128_CONFIG.channel_enable;
+static void set_config(const int chan_id, const u32 data) {
+    auto& chan = channels[chan_id];
+
+    const bool is_enabled = chan.configuration.channel_enable;
 
     assert(!is_enabled);
 
-    HW_DMACPLUS_SC128_CONFIG.raw = data;
+    chan.configuration.raw = data;
 
-    if (!is_enabled && HW_DMACPLUS_SC128_CONFIG.channel_enable) {
-        start_sc128_transfer();
+    if (!is_enabled && chan.configuration.channel_enable) {
+        start_transfer(chan_id);
     }
 }
 
@@ -321,6 +352,54 @@ static void write(const u32 addr, const u32 data) {
 
             HW_DMACPLUS_LCDC_FBCTRL.raw = data;
             break;
+        case IoAddress::IO_ADDRESS_SC2ME_SRCADDR:
+            logger->debug("SC2ME_SRCADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_SC2ME_SRCADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_SC2ME_DSTADDR:
+            logger->debug("SC2ME_DSTADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_SC2ME_DSTADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_SC2ME_LINKADDR:
+            logger->debug("SC2ME_LINKADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_SC2ME_LINKADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_SC2ME_CONTROL:
+            logger->debug("SC2ME_CONTROL write32 = {:08X}", data);
+
+            HW_DMACPLUS_SC2ME_CONTROL.raw = data;
+            break;
+        case IoAddress::IO_ADDRESS_SC2ME_CONFIG:
+            logger->debug("SC2ME_CONFIG write32 = {:08X}", data);
+            set_config(0, data);
+            break;
+        case IoAddress::IO_ADDRESS_ME2SC_SRCADDR:
+            logger->debug("ME2SC_SRCADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_ME2SC_SRCADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_ME2SC_DSTADDR:
+            logger->debug("ME2SC_DSTADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_ME2SC_DSTADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_ME2SC_LINKADDR:
+            logger->debug("ME2SC_LINKADDR write32 = {:08X}", data);
+
+            HW_DMACPLUS_ME2SC_LINKADDR = data;
+            break;
+        case IoAddress::IO_ADDRESS_ME2SC_CONTROL:
+            logger->debug("ME2SC_CONTROL write32 = {:08X}", data);
+
+            HW_DMACPLUS_ME2SC_CONTROL.raw = data;
+            break;
+        case IoAddress::IO_ADDRESS_ME2SC_CONFIG:
+            logger->debug("ME2SC_CONFIG write32 = {:08X}", data);
+            set_config(1, data);
+            break;
         case IoAddress::IO_ADDRESS_SC128_SRCADDR:
             logger->debug("SC128_SRCADDR write32 = {:08X}", data);
 
@@ -343,7 +422,7 @@ static void write(const u32 addr, const u32 data) {
             break;
         case IoAddress::IO_ADDRESS_SC128_CONFIG:
             logger->debug("SC128_CONFIG write32 = {:08X}", data);
-            set_sc128_config(data);
+            set_config(2, data);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
@@ -369,6 +448,15 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(DMACPLUS_ADDR, DMACPLUS_SIZE, page_desc);
+
+    // Each of the channel uses a different combination of source and
+    // destination AHBs
+    channels[0].src_bus = kanacore::get_sc_bus_ptr();
+    channels[1].src_bus = kanacore::get_me_bus_ptr();
+    channels[2].src_bus = kanacore::get_sc_bus_ptr();
+    channels[0].dst_bus = kanacore::get_me_bus_ptr();
+    channels[1].dst_bus = kanacore::get_sc_bus_ptr();
+    channels[2].dst_bus = kanacore::get_sc_bus_ptr();
 }
 
 void shutdown() {
