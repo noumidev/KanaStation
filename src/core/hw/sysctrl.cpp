@@ -322,14 +322,14 @@ void initialize(const u64 fuse_id) {
 
     std::memset(&ctx, 0, sizeof(ctx));
 
-    HW_SYSCTRL_RAMSIZE = TACHYON_VERSION | RAM_SIZE;
-
     ctx.fuse_id = fuse_id;
 }
 
 void soft_reset() {
     HW_SYSCTRL_PLLCTRL = 5;
     HW_SYSCTRL_PLLMULT = 0x01240901;
+
+    HW_SYSCTRL_RAMSIZE = TACHYON_VERSION | RAM_SIZE;
 }
 
 void hard_reset() {
