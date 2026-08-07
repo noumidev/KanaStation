@@ -80,6 +80,11 @@ static int write_reg(const u8* data) {
 
             logger->debug("CLKCTRL write = {:02X}", ctx.clock_control);
             break;
+        case RegisterAddress::REGISTER_ADDRESS_SSCTRL:
+            ctx.ss_control = *data;
+
+            logger->debug("SSCTRL write = {:02X}", ctx.ss_control);
+            break;
         default:
             logger->error("Unimplemented register write {:02X}", ctx.reg_addr);
             exit(1);
