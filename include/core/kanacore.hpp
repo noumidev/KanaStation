@@ -56,5 +56,6 @@ void release_button(const Button button);
 common::u32 get_button_state();
 
 bool run();
+void vsync();
 
 };

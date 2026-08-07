@@ -38,11 +38,13 @@ set(SOURCES
     src/core/hw/bus.cpp
     src/core/hw/clockdiv.cpp
     src/core/hw/ddr_ram.cpp
+    src/core/hw/display.cpp
     src/core/hw/dmac.cpp
     src/core/hw/dmacplus.cpp
     src/core/hw/gpio.cpp
     src/core/hw/intc.cpp
     src/core/hw/kirk.cpp
+    src/core/hw/lcdc.cpp
     src/core/hw/ms.cpp
     src/core/hw/nand.cpp
     src/core/hw/shared_ram.cpp
@@ -79,11 +81,13 @@ set(HEADERS
     include/core/hw/bus.hpp
     include/core/hw/clockdiv.hpp
     include/core/hw/ddr_ram.hpp
+    include/core/hw/display.hpp
     include/core/hw/dmac.hpp
     include/core/hw/dmacplus.hpp
     include/core/hw/gpio.hpp
     include/core/hw/intc.hpp
     include/core/hw/kirk.hpp
+    include/core/hw/lcdc.hpp
     include/core/hw/ms.hpp
     include/core/hw/nand.hpp
     include/core/hw/shared_ram.hpp

@@ -47,6 +47,7 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "SysTime",
     "Count (SC)",
     "Count (ME)",
+    "HSYNC",
     "VSYNC",
 };
 

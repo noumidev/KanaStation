@@ -21,11 +21,13 @@
 #include <core/hw/bus.hpp>
 #include <core/hw/clockdiv.hpp>
 #include <core/hw/ddr_ram.hpp>
+#include <core/hw/display.hpp>
 #include <core/hw/dmac.hpp>
 #include <core/hw/dmacplus.hpp>
 #include <core/hw/gpio.hpp>
 #include <core/hw/intc.hpp>
 #include <core/hw/kirk.hpp>
+#include <core/hw/lcdc.hpp>
 #include <core/hw/ms.hpp>
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
@@ -58,10 +60,15 @@ static u32 button_state = 0;
 
 static bool frame_end = false;
 
-// Move this to display code later on
-static void vsync(const int) {
-    hw::intc::assert_sc_interrupt(30);
+static void schedule_vsync();
 
+static void vsync(const int) {
+    frame_end = true;
+
+    schedule_vsync();
+}
+
+static void schedule_vsync() {
     scheduler::schedule_event(
         scheduler::EventType::VSYNC,
         vsync,
@@ -69,10 +76,6 @@ static void vsync(const int) {
         scheduler::from_microseconds(16666),
         true
     );
-
-    hw::dmacplus::scanout();
-
-    frame_end = true;
 }
 
 void initialize(const Configuration config) {
@@ -105,11 +108,13 @@ void initialize(const Configuration config) {
     hw::boot_rom::initialize(config.boot_path);
     hw::clockdiv::initialize();
     hw::ddr_ram::initialize();
+    hw::display::initialize();
     hw::dmac::initialize();
     hw::dmacplus::initialize();
     hw::i2c::initialize();
     hw::intc::initialize();
     hw::kirk::initialize();
+    hw::lcdc::initialize();
     hw::ms::initialize(config.ms_path);
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
@@ -138,12 +143,14 @@ void soft_reset() {
     hw::boot_rom::soft_reset();
     hw::clockdiv::soft_reset();
     hw::ddr_ram::soft_reset();
+    hw::display::soft_reset();
     hw::dmac::soft_reset();
     hw::dmacplus::soft_reset();
     hw::gpio::soft_reset();
     hw::i2c::soft_reset();
     hw::intc::soft_reset();
     hw::kirk::soft_reset();
+    hw::lcdc::soft_reset();
     hw::ms::soft_reset();
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
@@ -174,12 +181,14 @@ void hard_reset() {
     hw::boot_rom::hard_reset();
     hw::clockdiv::hard_reset();
     hw::ddr_ram::hard_reset();
+    hw::display::hard_reset();
     hw::dmac::hard_reset();
     hw::dmacplus::hard_reset();
     hw::gpio::hard_reset();
     hw::i2c::hard_reset();
     hw::intc::hard_reset();
     hw::kirk::hard_reset();
+    hw::lcdc::hard_reset();
     hw::ms::hard_reset();
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
@@ -203,14 +212,8 @@ void hard_reset() {
 
     // Halt ME until SC resets it
     me.wait_for_interrupt();
-
-    scheduler::schedule_event(
-        scheduler::EventType::VSYNC,
-        vsync,
-        0,
-        scheduler::from_microseconds(16666),
-        true
-    );
+    
+    schedule_vsync();
 }
 
 void shutdown() {
@@ -221,12 +224,14 @@ void shutdown() {
     hw::boot_rom::shutdown();
     hw::clockdiv::shutdown();
     hw::ddr_ram::shutdown();
+    hw::display::shutdown();
     hw::dmac::shutdown();
     hw::dmacplus::shutdown();
     hw::gpio::shutdown();
     hw::i2c::shutdown();
     hw::intc::shutdown();
     hw::kirk::shutdown();
+    hw::lcdc::shutdown();
     hw::ms::shutdown();
     hw::nand::shutdown();
     hw::shared_ram::shutdown();

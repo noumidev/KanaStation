@@ -18,7 +18,8 @@ constexpr common::i64 SCHEDULER_CLOCKRATE = 2 * BUS_CLOCKRATE + 1;
 
 constexpr common::i64 ONE_MICROSECOND = SCHEDULER_CLOCKRATE / 1000 / 1000;
 
-constexpr common::i64 SPI_CLOCKRATE = 2 * ONE_MICROSECOND;
+constexpr common::i64 SPI_CLOCKRATE   = 2 * ONE_MICROSECOND;
+constexpr common::i64 PIXEL_CLOCKRATE = 9000000;
 
 enum EventType {
     KIRK_1ST_PHASE,
@@ -37,6 +38,7 @@ enum EventType {
     SYSTIME,
     COUNT_SC,
     COUNT_ME,
+    HSYNC,
     VSYNC,
     NUM_EVENT_TYPES,
 };
