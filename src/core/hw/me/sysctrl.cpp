@@ -33,24 +33,29 @@ constexpr u32 RAM_SIZE = 1;
 
 // All of this is assuming this has the same registers as SC SYSCTRL...
 enum IoAddress {
+    IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
     IO_ADDRESS_RAMSIZE    = SYSCTRL_ADDR + 0x040,
     IO_ADDRESS_POSTSC     = SYSCTRL_ADDR + 0x044,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
+    IO_ADDRESS_CLKSEL_LO  = SYSCTRL_ADDR + 0x05C,
 };
 
+#define HW_SYSCTRL_NMIEN      ctx.nmi.enable
 #define HW_SYSCTRL_NMIFLAGS   ctx.nmi.flags
 #define HW_SYSCTRL_RAMSIZE    ctx.ram_size
 #define HW_SYSCTRL_RESETEN    ctx.reset_enable
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
+#define HW_SYSCTRL_CLKSEL_LO  ctx.clock_select[0]
 
 static std::shared_ptr<spdlog::logger> logger;
 
 static struct {
     struct {
+        u32 enable;
         u32 flags;
     } nmi;
 
@@ -63,12 +68,18 @@ static struct {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_NMIEN:
+            logger->debug("NMIEN read32");
+            return HW_SYSCTRL_NMIEN;
         case IoAddress::IO_ADDRESS_BUSCLKEN:
             logger->debug("BUSCLKEN read32");
             return HW_SYSCTRL_BUSCLKEN;
         case IoAddress::IO_ADDRESS_CLOCKEN_LO:
             logger->debug("CLOCKEN_LO read32");
             return HW_SYSCTRL_CLOCKEN_LO;
+        case IoAddress::IO_ADDRESS_CLKSEL_LO:
+            logger->debug("CLKSEL_LO read32");
+            return HW_SYSCTRL_CLKSEL_LO;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
             exit(1);
@@ -108,6 +119,11 @@ static void write(const u32 addr, const u32 data) {
 
             // See above
             HW_SYSCTRL_CLOCKEN_LO = data;
+            break;
+        case IoAddress::IO_ADDRESS_CLKSEL_LO:
+            logger->debug("CLKSEL_LO write32 = {:08X}", data);
+
+            HW_SYSCTRL_CLKSEL_LO = data;
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
