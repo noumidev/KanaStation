@@ -266,14 +266,34 @@ static void write(const u32 addr, const u32 data) {
     check_pending_interrupts();
 }
 
+static void clear_ms_led() {
+    logger->trace("MS_LED OFF");
+}
+
+static void clear_wlan_led() {
+    logger->trace("WLAN_LED OFF");
+}
+
+static void set_ms_led() {
+    logger->trace("MS_LED ON");
+}
+
+static void set_wlan_led() {
+    logger->trace("WLAN_LED ON");
+}
+
 void initialize() {
     logger = spdlog::stdout_color_st("GPIO");
 
     clear_funcs.fill(nullptr);
-    clear_funcs[Pin::PIN_SYSCON_NOTIFY] = syscon::clear_notify;
+    clear_funcs[Pin::PIN_SYSCON_NOTIFY  ] = syscon::clear_notify;
+    clear_funcs[Pin::PIN_SYSCON_MS_LED  ] = clear_ms_led;
+    clear_funcs[Pin::PIN_SYSCON_WLAN_LED] = clear_wlan_led;
 
     set_funcs.fill(nullptr);
-    set_funcs[Pin::PIN_SYSCON_NOTIFY] = syscon::set_notify;
+    set_funcs[Pin::PIN_SYSCON_NOTIFY  ] = syscon::set_notify;
+    set_funcs[Pin::PIN_SYSCON_MS_LED  ] = set_ms_led;
+    set_funcs[Pin::PIN_SYSCON_WLAN_LED] = set_wlan_led;
 
     std::memset(&ctx, 0, sizeof(ctx));
 }
