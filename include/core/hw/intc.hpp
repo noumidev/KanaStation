@@ -23,7 +23,6 @@ private:
     std::shared_ptr<spdlog::logger> logger;
 
     common::u32 flags[NUM_REGS];
-    common::u32 raw_flags[NUM_REGS];
     common::u32 mask[NUM_REGS];
 
     void check_pending_interrupts();

@@ -45,10 +45,6 @@ enum IoAddress {
 #define HW_INTC_FLAGS_LO     flags[0]
 #define HW_INTC_FLAGS_MID    flags[1]
 #define HW_INTC_FLAGS_HI     flags[2]
-#define HW_INTC_RAWFLAGS     raw_flags[reg_idx]
-#define HW_INTC_RAWFLAGS_LO  raw_flags[0]
-#define HW_INTC_RAWFLAGS_MID raw_flags[1]
-#define HW_INTC_RAWFLAGS_HI  raw_flags[2]
 #define HW_INTC_MASK         mask[reg_idx]
 #define HW_INTC_MASK_LO      mask[0]
 #define HW_INTC_MASK_MID     mask[1]
@@ -79,28 +75,28 @@ u32 Intc::read(const u32 addr) const {
     switch (addr) {
         case IoAddress::IO_ADDRESS_FLAGS_LO:
             logger->debug("FLAGS_LO read32");
-            return HW_INTC_FLAGS_LO;
+            return HW_INTC_FLAGS_LO & HW_INTC_MASK_LO;
         case IoAddress::IO_ADDRESS_RAWFLAGS_LO:
             logger->debug("RAWFLAGS_LO read32");
-            return HW_INTC_RAWFLAGS_LO;
+            return HW_INTC_FLAGS_LO;
         case IoAddress::IO_ADDRESS_MASK_LO:
             logger->debug("MASK_LO read32");
             return HW_INTC_MASK_LO;
         case IoAddress::IO_ADDRESS_FLAGS_MID:
             logger->debug("FLAGS_MID read32");
-            return HW_INTC_FLAGS_MID;
+            return HW_INTC_FLAGS_MID & HW_INTC_MASK_MID;
         case IoAddress::IO_ADDRESS_RAWFLAGS_MID:
             logger->debug("RAWFLAGS_MID read32");
-            return HW_INTC_RAWFLAGS_MID;
+            return HW_INTC_FLAGS_MID;
         case IoAddress::IO_ADDRESS_MASK_MID:
             logger->debug("MASK_MID read32");
             return HW_INTC_MASK_MID;
         case IoAddress::IO_ADDRESS_FLAGS_HI:
             logger->debug("FLAGS_HI read32");
-            return HW_INTC_FLAGS_HI;
+            return HW_INTC_FLAGS_HI & HW_INTC_MASK_HI;
         case IoAddress::IO_ADDRESS_RAWFLAGS_HI:
             logger->debug("RAWFLAGS_HI read32");
-            return HW_INTC_RAWFLAGS_HI;
+            return HW_INTC_FLAGS_HI;
         case IoAddress::IO_ADDRESS_MASK_HI:
             logger->debug("MASK_HI read32");
             return HW_INTC_MASK_HI;
@@ -116,37 +112,31 @@ void Intc::write(const u32 addr, const u32 data) {
             logger->debug("FLAGS_LO write32 = {:08X}", data);
 
             HW_INTC_FLAGS_LO &= ~data;
-            HW_INTC_RAWFLAGS_LO &= ~data;
             break;
         case IoAddress::IO_ADDRESS_MASK_LO:
-            logger->debug("MASK_LO write32 = {:08X}", data);
+            logger->debug("MASK_LO write32 = {:08X} ({:08X})", data, HW_INTC_FLAGS_LO);
 
             HW_INTC_MASK_LO = data;
-            HW_INTC_FLAGS_LO |= (HW_INTC_MASK_LO & HW_INTC_RAWFLAGS_LO);
             break;
         case IoAddress::IO_ADDRESS_FLAGS_MID:
             logger->debug("FLAGS_MID write32 = {:08X}", data);
 
             HW_INTC_FLAGS_MID &= ~data;
-            HW_INTC_RAWFLAGS_MID &= ~data;
             break;
         case IoAddress::IO_ADDRESS_MASK_MID:
             logger->debug("MASK_MID write32 = {:08X}", data);
 
             HW_INTC_MASK_MID = data;
-            HW_INTC_FLAGS_MID |= (HW_INTC_MASK_MID & HW_INTC_RAWFLAGS_MID);
             break;
         case IoAddress::IO_ADDRESS_FLAGS_HI:
             logger->debug("FLAGS_HI write32 = {:08X}", data);
 
             HW_INTC_FLAGS_HI &= ~data;
-            HW_INTC_RAWFLAGS_HI &= ~data;
             break;
         case IoAddress::IO_ADDRESS_MASK_HI:
             logger->debug("MASK_HI write32 = {:08X}", data);
 
             HW_INTC_MASK_HI = data;
-            HW_INTC_FLAGS_HI |= (HW_INTC_MASK_HI & HW_INTC_RAWFLAGS_HI);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
@@ -164,11 +154,9 @@ void Intc::assert_interrupt(const int intr_num) {
 
     assert((u64)reg_idx < NUM_REGS);
 
-    HW_INTC_RAWFLAGS |= intr_bit;
+    HW_INTC_FLAGS |= intr_bit;
 
     if ((HW_INTC_MASK & intr_bit) != 0) {
-        HW_INTC_FLAGS |= intr_bit;
-
         cpu->assert_interrupt();
     }
 }
@@ -182,7 +170,6 @@ void Intc::clear_interrupt(const int intr_num) {
     assert((u64)reg_idx < NUM_REGS);
 
     HW_INTC_FLAGS &= ~intr_bit;
-    HW_INTC_RAWFLAGS &= ~intr_bit;
     
     check_pending_interrupts();
 }
