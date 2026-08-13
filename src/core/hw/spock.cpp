@@ -263,7 +263,7 @@ static i32 command_decrypt_dki() {
 }
 
 static i32 command_decrypt_sectors() {
-    logger->error("DECRYPT_SECTORS");
+    logger->debug("DECRYPT_SECTORS");
 
     assert((HW_SPOCK_LENGTH > 0) && ((HW_SPOCK_LENGTH % 0x810) == 0));
 
