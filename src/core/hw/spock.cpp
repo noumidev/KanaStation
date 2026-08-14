@@ -108,6 +108,9 @@ static struct {
     u32 transfer_addr[NUM_TRANS_REGS];
     u32 transfer_length[NUM_TRANS_REGS];
     u32 total_length;
+
+    i64 command_delay;
+    bool send_ata_interrupt;
 } ctx;
 
 static void dma_read(const u32 addr, u8* data, const u32 size) {
@@ -154,6 +157,12 @@ static void assert_interrupt(const int intr_num) {
 static void end_command(const int result) {
     HW_SPOCK_STATUS.busy = 0;
     HW_SPOCK_RESULT = result;
+
+    if (ctx.send_ata_interrupt) {
+        ctx.send_ata_interrupt = false;
+
+        atapi::assert_transfer_end_interrupt();
+    }
 
     assert_interrupt(0);
 }
@@ -245,7 +254,9 @@ static i32 command_decrypt_mki() {
     dma_write (HW_SPOCK_TADDR[0], MKI, sizeof(MKI));
 
     // Commands that read data from UMD trigger ATA interrupts
-    atapi::assert_transfer_end_interrupt();
+    ctx.send_ata_interrupt = true;
+
+    ctx.command_delay = 12000;
 
     return SpockResult::SPOCK_RESULT_OK;
 }
@@ -258,6 +269,8 @@ static i32 command_decrypt_dki() {
     std::vector<u8> dki(HW_SPOCK_TLENGTH[4]);
 
     dma_read(HW_SPOCK_TADDR[4], dki.data(), dki.size());
+
+    ctx.command_delay = 1000;
 
     return SpockResult::SPOCK_RESULT_OK;
 }
@@ -293,7 +306,9 @@ static i32 command_decrypt_sectors() {
     }
 
     // Commands that read data from UMD trigger ATA interrupts
-    atapi::assert_transfer_end_interrupt();
+    ctx.send_ata_interrupt = true;
+
+    ctx.command_delay = sector_num * 1500;
 
     return SpockResult::SPOCK_RESULT_OK;
 }
@@ -306,6 +321,9 @@ static i32 command_reset() {
 static void start_command() {
     assert(!HW_SPOCK_STATUS.busy);
     assert(HW_SPOCK_COMMAND.flag == 1);
+
+    // Default delay
+    ctx.command_delay = 10;
 
     i32 result;
 
@@ -355,7 +373,7 @@ static void start_command() {
         scheduler::EventType::SPOCK,
         end_command,
         result,
-        scheduler::from_microseconds(5),
+        scheduler::from_microseconds(ctx.command_delay),
         true
     );
 
