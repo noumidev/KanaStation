@@ -40,6 +40,7 @@ enum EventType {
     COUNT_ME,
     HSYNC,
     VSYNC,
+    RPC,
     NUM_EVENT_TYPES,
 };
 

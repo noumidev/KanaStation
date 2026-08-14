@@ -49,6 +49,7 @@ static constexpr const char* EVENT_TYPE_NAMES[] = {
     "Count (ME)",
     "HSYNC",
     "VSYNC",
+    "RPC"
 };
 
 struct Event {

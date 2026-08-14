@@ -17,6 +17,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <core/kanacore.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/boot_rom.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
@@ -222,6 +223,10 @@ static void write_reset_enable(u32 data) {
     HW_SYSCTRL_RESETEN = data;
 }
 
+static void assert_rpc_interrupt(const int) {
+    intc::assert_me_interrupt(31);
+}
+
 static void write(const u32 addr, const u32 data) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_NMIFLAGS:
@@ -241,7 +246,20 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("POSTME write32 = {:08X}", data);
             
             if ((data & 1) != 0) {
-                intc::assert_me_interrupt(31);
+                bus::Bus* bus = kanacore::get_sc_bus_ptr();
+
+                const u32 command = bus->read<u32>(0x1FC00600);
+
+                scheduler::schedule_event(
+                    scheduler::EventType::RPC,
+                    assert_rpc_interrupt,
+                    0,
+                    // For some weird reason, later firmwares send their first RPC interrupt
+                    // WAY too early... ME isn't ready to accept them at the time, and so it
+                    // discards them. By delaying them by a second, it works... we need to
+                    // figure out how this actually ends up working on hardware
+                    scheduler::from_microseconds((command == 0x185) ? 1000000 : 2)
+                );
             }
             break;
         case IoAddress::IO_ADDRESS_RESETEN:
