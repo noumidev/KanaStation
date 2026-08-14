@@ -279,7 +279,7 @@ void Allegrex::set_control_reg(const u32 idx, const u32 data) {
 u32 Allegrex::get_status_reg(const u32 idx) const {
     assert(idx < Cp0::NUM_REGS);
 
-    u32 data;
+    u32 data = 0;
 
     switch (idx) {
         case Cp0::StatusRegister::STATUS_REGISTER_COUNT:
@@ -315,9 +315,13 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
         case Cp0::StatusRegister::STATUS_REGISTER_TAGHI:
             data = cp0.taghi;
             break;
+        case 24:
+            // Later firmwares read this register. Bit 0 = 1 seems to trigger clearing
+            // the L2 cache, which doesn't exist on early models?
+            break;
         default:
-            logger->warn("Unimplemented read from CP0 status register {}", Cp0::STATUS_REGISTER_NAMES[idx]);
-            return 0;
+            logger->error("Unimplemented read from CP0 status register {} ({})", Cp0::STATUS_REGISTER_NAMES[idx], idx);
+            exit(1);
     }
 
     logger->debug("Read from CP0 status register {}", Cp0::STATUS_REGISTER_NAMES[idx]);
@@ -358,9 +362,12 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
         case Cp0::StatusRegister::STATUS_REGISTER_TAGHI:
             cp0.taghi = data;
             break;
+        case Cp0::StatusRegister::STATUS_REGISTER_ERROREPC:
+            cp0.error_epc = data;
+            break;
         default:
-            logger->warn("Unimplemented write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
-            return;
+            logger->error("Unimplemented write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);
+            exit(1);
     }
 
     logger->debug("Write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);

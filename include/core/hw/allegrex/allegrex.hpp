@@ -44,22 +44,23 @@ struct Cp0 {
         "Status"  , "Cause" , "EPC"     , "PRId"   ,
         "Config"  , "N/A"   , "N/A"     , "N/A"    ,
         "N/A"     , "SCCode", "CPUId"   , "N/A"    ,
-        "N/A"     , "EBase" , "N/A"     , "N/A"    ,
+        "24"      , "EBase" , "N/A"     , "N/A"    ,
         "TagLo"   , "TagHi" , "ErrorEPC", "N/A"    ,
     };
 
     enum StatusRegister {
-        STATUS_REGISTER_COUNT   = 0x09,
-        STATUS_REGISTER_COMPARE = 0x0B,
-        STATUS_REGISTER_STATUS  = 0x0C,
-        STATUS_REGISTER_CAUSE   = 0x0D,
-        STATUS_REGISTER_EPC     = 0x0E,
-        STATUS_REGISTER_CONFIG  = 0x10,
-        STATUS_REGISTER_SCCODE  = 0x15,
-        STATUS_REGISTER_CPUID   = 0x16,
-        STATUS_REGISTER_EBASE   = 0x19,
-        STATUS_REGISTER_TAGLO   = 0x1C,
-        STATUS_REGISTER_TAGHI   = 0x1D,
+        STATUS_REGISTER_COUNT    = 0x09,
+        STATUS_REGISTER_COMPARE  = 0x0B,
+        STATUS_REGISTER_STATUS   = 0x0C,
+        STATUS_REGISTER_CAUSE    = 0x0D,
+        STATUS_REGISTER_EPC      = 0x0E,
+        STATUS_REGISTER_CONFIG   = 0x10,
+        STATUS_REGISTER_SCCODE   = 0x15,
+        STATUS_REGISTER_CPUID    = 0x16,
+        STATUS_REGISTER_EBASE    = 0x19,
+        STATUS_REGISTER_TAGLO    = 0x1C,
+        STATUS_REGISTER_TAGHI    = 0x1D,
+        STATUS_REGISTER_ERROREPC = 0x1E,
     };
 
 
@@ -132,6 +133,7 @@ struct Cp0 {
     common::u32 ebase;
     common::u32 taglo;
     common::u32 taghi;
+    common::u32 error_epc;
 
     common::i64 count_timestamp;
 };
