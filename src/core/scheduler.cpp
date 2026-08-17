@@ -33,6 +33,7 @@ constexpr i64 SYNC_CYCLES = 128;
 static constexpr const char* EVENT_TYPE_NAMES[] = {
     "KIRK 1st phase",
     "SPOCK",
+    "MG",
     "LEPTON",
     "ATAPI",
     "SPI TX",

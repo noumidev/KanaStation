@@ -45,6 +45,7 @@ set(SOURCES
     src/core/hw/intc.cpp
     src/core/hw/kirk.cpp
     src/core/hw/lcdc.cpp
+    src/core/hw/mg.cpp
     src/core/hw/ms.cpp
     src/core/hw/nand.cpp
     src/core/hw/shared_ram.cpp
@@ -88,6 +89,7 @@ set(HEADERS
     include/core/hw/intc.hpp
     include/core/hw/kirk.hpp
     include/core/hw/lcdc.hpp
+    include/core/hw/mg.hpp
     include/core/hw/ms.hpp
     include/core/hw/nand.hpp
     include/core/hw/shared_ram.hpp

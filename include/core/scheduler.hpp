@@ -13,8 +13,8 @@ namespace kanacore::scheduler {
 
 typedef void (*Callback)(const int);
 
-constexpr common::i64 BUS_CLOCKRATE       = 166666666;
-constexpr common::i64 SCHEDULER_CLOCKRATE = 2 * BUS_CLOCKRATE + 1;
+constexpr common::i64 SCHEDULER_CLOCKRATE = 333000000;
+constexpr common::i64 BUS_CLOCKRATE       = SCHEDULER_CLOCKRATE / 2;
 
 constexpr common::i64 ONE_MICROSECOND = SCHEDULER_CLOCKRATE / 1000 / 1000;
 
@@ -24,6 +24,7 @@ constexpr common::i64 PIXEL_CLOCKRATE = 9000000;
 enum EventType {
     KIRK_1ST_PHASE,
     SPOCK,
+    MG,
     LEPTON,
     ATAPI,
     SPI_TX,

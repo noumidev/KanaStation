@@ -28,6 +28,7 @@
 #include <core/hw/intc.hpp>
 #include <core/hw/kirk.hpp>
 #include <core/hw/lcdc.hpp>
+#include <core/hw/mg.hpp>
 #include <core/hw/ms.hpp>
 #include <core/hw/nand.hpp>
 #include <core/hw/shared_ram.hpp>
@@ -115,6 +116,7 @@ void initialize(const Configuration config) {
     hw::intc::initialize();
     hw::kirk::initialize();
     hw::lcdc::initialize();
+    hw::mg::initialize();
     hw::ms::initialize(config.ms_path);
     hw::nand::initialize(config.nand_path);
     hw::shared_ram::initialize();
@@ -151,6 +153,7 @@ void soft_reset() {
     hw::intc::soft_reset();
     hw::kirk::soft_reset();
     hw::lcdc::soft_reset();
+    hw::mg::soft_reset();
     hw::ms::soft_reset();
     hw::nand::soft_reset();
     hw::shared_ram::soft_reset();
@@ -189,6 +192,7 @@ void hard_reset() {
     hw::intc::hard_reset();
     hw::kirk::hard_reset();
     hw::lcdc::hard_reset();
+    hw::mg::hard_reset();
     hw::ms::hard_reset();
     hw::nand::hard_reset();
     hw::shared_ram::hard_reset();
@@ -232,6 +236,7 @@ void shutdown() {
     hw::intc::shutdown();
     hw::kirk::shutdown();
     hw::lcdc::shutdown();
+    hw::mg::shutdown();
     hw::ms::shutdown();
     hw::nand::shutdown();
     hw::shared_ram::shutdown();
