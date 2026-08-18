@@ -14,6 +14,7 @@ Drop the provided `config.toml` in the same folder as the executable and change 
 - `fuse_id` is a 48-bit identifier and unique to every console. Per-console cryptography depends on this identifier and is not optional. You can find it by running software like `psp_ident` on your console.
 - `mobo_type` is the motherboard type of your console and identifies the model (1000, 2000, ...). Like `fuse_id`, you can find it by running `psp_ident` on your console. The only supported values as of right now are `"TA-082"`, a specific model of PSP-1000 (the model I'm developing the emulator with), and `"TA-088"`, a Slim model. The emulator will support more in the future.
 - `service_mode` boots the emulator into service mode, allowing you to run custom IPL payloads from a Memory Stick image. This should be `false` in 99.99% of cases.
+- `splines` enables the rendering of B-Splines. They are slow and currently a little broken, but also required for the XMB waves.
 - Set up all paths. Boot ROM and NAND are required, UMD and Memory Stick are optional.
 
 ## Build instructions

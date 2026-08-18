@@ -51,6 +51,10 @@ Configuration parse_args() {
 
         config.service_mode = table.at_path("core.service_mode").value_or<bool>(false);
 
+        // GraphicsEngine config
+        config.render_splines = table.at_path("ge.splines").value_or<bool>(false);
+
+        // File config
         boot_path = table.at_path("boot_rom.path").value_or<std::string>("");
         nand_path = table.at_path("nand.path").value_or<std::string>("");
         ms_path   = table.at_path("memory_stick.path").value_or<std::string>("");

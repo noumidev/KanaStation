@@ -24,6 +24,9 @@ struct Configuration {
     // Enables service mode
     bool service_mode;
 
+    // Enables spline rendering (slow!)
+    bool render_splines;
+
     // Path to a PSP boot ROM image
     const char* boot_path;
 

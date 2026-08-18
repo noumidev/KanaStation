@@ -6,6 +6,10 @@ mobo_type = "TA-082"
 # Boots emulator into service mode when true, reading an IPL from Memory Stick (REQUIRED)
 service_mode = false
 
+[ge]
+# Enables spline rendering
+splines = false
+
 [boot_rom]
 # REQUIRED
 path = ""
