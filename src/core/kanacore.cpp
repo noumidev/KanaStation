@@ -102,13 +102,13 @@ void initialize(const Configuration config) {
 
     scheduler::initialize();
     hw::gpio::initialize();
-    hw::sysctrl::initialize(config.fuse_id);
+    hw::sysctrl::initialize(config);
 
     hw::atapi::initialize(config.umd_path);
     hw::audio::initialize();
     hw::boot_rom::initialize(config.boot_path);
     hw::clockdiv::initialize();
-    hw::ddr_ram::initialize();
+    hw::ddr_ram::initialize(config);
     hw::display::initialize();
     hw::dmac::initialize();
     hw::dmacplus::initialize();
@@ -118,11 +118,11 @@ void initialize(const Configuration config) {
     hw::lcdc::initialize();
     hw::mg::initialize();
     hw::ms::initialize(config.ms_path);
-    hw::nand::initialize(config.nand_path);
+    hw::nand::initialize(config);
     hw::shared_ram::initialize();
     hw::spi::initialize();
     hw::spock::initialize();
-    hw::syscon::initialize(config.service_mode);
+    hw::syscon::initialize(config);
     hw::systime::initialize();
     hw::allegrex::interpreter::initialize();
     hw::allegrex::scratchpad::initialize();

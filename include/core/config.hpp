@@ -13,6 +13,7 @@ namespace kanacore {
 
 enum MotherboardType {
     MOTHERBOARD_TYPE_TA082,
+    MOTHERBOARD_TYPE_TA088,
 };
 
 struct Configuration {

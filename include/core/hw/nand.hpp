@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include <core/config.hpp>
+
 namespace kanacore::hw::nand {
 
-void initialize(const char* nand_path);
+void initialize(const Configuration config);
 void soft_reset();
 void hard_reset();
 void shutdown();

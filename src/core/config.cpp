@@ -38,9 +38,16 @@ Configuration parse_args() {
         table = result.table();
 
         config.fuse_id = table.at_path("core.fuse_id").value_or<u64>(0);
-        
-        // We'll ignore parsing the motherboard type for now as we only support
-        // one at the moment
+
+        const std::string mobo_type = table.at_path("core.mobo_type").value_or<std::string>("");
+
+        if (mobo_type == "TA-082") {
+            config.mobo_type = MotherboardType::MOTHERBOARD_TYPE_TA082;
+        } else if (mobo_type == "TA-088") {
+            config.mobo_type = MotherboardType::MOTHERBOARD_TYPE_TA088;
+        } else {
+            // We default to TA-082
+        }
 
         config.service_mode = table.at_path("core.service_mode").value_or<bool>(false);
 

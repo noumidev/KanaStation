@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include <core/config.hpp>
+
 namespace kanacore::hw::ddr_ram {
 
-void initialize();
+void initialize(const Configuration config);
 void soft_reset();
 void hard_reset();
 void shutdown();

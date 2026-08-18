@@ -29,6 +29,21 @@ constexpr u64 BUFFER_SIZE = 16;
 
 constexpr u64 SCRATCHPAD_SIZE = 0x20;
 
+constexpr u32 BARYON_VERSIONS[] = {
+    0x00114000, // TA-082
+    0x00243000, // TA-088v1/2
+};
+
+constexpr const char* BARYON_TIMESTAMPS[] = {
+    "200509260441", // TA-082
+    "200711022212", // TA-088v1/2
+};
+
+constexpr u32 POMMEL_VERSIONS[] = {
+    0x112, // TA-082
+    0x123, // TA-088v1/2
+};
+
 // These values were taken from one of my PSPs
 constexpr static u8 INITIAL_SCRATCHPAD[SCRATCHPAD_SIZE] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -84,6 +99,10 @@ static struct {
     std::array<u8, SCRATCHPAD_SIZE> scratchpad;
 
     u8 baryon_status;
+
+    u32 baryon_version;
+    u32 pommel_version;
+    const char* baryon_timestamp;
 
     bool service_mode;
 } ctx;
@@ -205,7 +224,7 @@ static void common_read(const u8 command) {
         case SysconCommand::SYSCON_COMMAND_GET_POMMEL_VERSION:
             logger->debug("GET_POMMEL_VERSION");
             
-            data = 0x112;
+            data = ctx.pommel_version;
             break;
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             logger->debug("GET_POWER_STATUS");
@@ -303,19 +322,17 @@ static void command_ctrl_hr_power() {
 }
 
 static void command_get_baryon_timestamp() {
-    constexpr const char* BARYON_TIMESTAMP = "200509260441";
-
     logger->debug("GET_BARYON_TIMESTAMP");
 
-    write_transmit_data((u8*)BARYON_TIMESTAMP, std::strlen(BARYON_TIMESTAMP));
+    assert(ctx.baryon_timestamp != nullptr);
+
+    write_transmit_data((u8*)ctx.baryon_timestamp, std::strlen(ctx.baryon_timestamp));
 }
 
 static void command_get_baryon_version() {
-    constexpr u32 BARYON_VERSION = 0x00114000;
-
     logger->debug("GET_BARYON_VERSION");
 
-    write_transmit_data((u8*)&BARYON_VERSION, sizeof(BARYON_VERSION));
+    write_transmit_data((u8*)&ctx.baryon_version, sizeof(u32));
 }
 
 static void command_read_scratchpad() {
@@ -430,14 +447,25 @@ static void start_command() {
     gpio::clear_pin(gpio::Pin::PIN_SYSCON_ACKNOWLEDGE);
 }
 
-void initialize(const bool service_mode) {
+void initialize(const Configuration config) {
     logger = spdlog::stdout_color_st("SYSCON");
 
     std::memcpy(ctx.scratchpad.data(), INITIAL_SCRATCHPAD, SCRATCHPAD_SIZE);
 
-    ctx.baryon_status = BaryonStatus::BARYON_STATUS_ALARM | BaryonStatus::BARYON_STATUS_AC_POWER;
+    ctx.baryon_status = BaryonStatus::BARYON_STATUS_AC_POWER;
 
-    ctx.service_mode = service_mode;
+    ctx.baryon_version = BARYON_VERSIONS[config.mobo_type];
+    ctx.pommel_version = POMMEL_VERSIONS[config.mobo_type];
+    ctx.baryon_timestamp = BARYON_TIMESTAMPS[config.mobo_type];
+
+    ctx.service_mode = config.service_mode;
+
+    logger->info(
+        "BARYON version: {:08X}, BARYON timestamp: {}, POMMEL version: {:03X}",
+        ctx.baryon_version,
+        ctx.baryon_timestamp,
+        ctx.pommel_version
+    );
 }
 
 void soft_reset() {
@@ -459,7 +487,7 @@ void clear_notify() {
 
     // Reset command state
     std::memset(receive_buffer.buf, 0, BUFFER_SIZE);
-    receive_buffer.ptr  = 0;
+    receive_buffer.ptr = 0;
 
     std::memset(transmit_buffer.buf, 0, BUFFER_SIZE);
     transmit_buffer.ptr = 0;

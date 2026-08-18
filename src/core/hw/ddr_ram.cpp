@@ -7,10 +7,10 @@
 
 #include <core/hw/ddr_ram.hpp>
 
-#include <array>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include <common/types.hpp>
 #include <core/kanacore.hpp>
@@ -22,9 +22,10 @@ using namespace common;
 
 constexpr u64 RAM_ADDR = 0x08000000;
 constexpr u64 RAM_SIZE = 0x2000000;
-constexpr u64 RAM_MASK = RAM_SIZE - 1;
 
-static std::array<u8, RAM_SIZE> ram;
+static std::vector<u8> ram;
+
+static u64 ram_size;
 
 template<typename T>
 static T read(const u32 addr) {
@@ -32,7 +33,7 @@ static T read(const u32 addr) {
 
     T data;
 
-    std::memcpy(&data, ram.data() + (addr & RAM_MASK), sizeof(T));
+    std::memcpy(&data, ram.data() + (addr & (ram_size - 1)), sizeof(T));
 
     return data;
 }
@@ -41,11 +42,18 @@ template<typename T>
 static void write(const u32 addr, const T data) {
     assert((addr & (sizeof(T) - 1)) == 0);
 
-    std::memcpy(ram.data() + (addr & RAM_MASK), &data, sizeof(T));
+    std::memcpy(ram.data() + (addr & (ram_size - 1)), &data, sizeof(T));
 }
 
-void initialize() {
+void initialize(const Configuration config) {
+    ram_size = RAM_SIZE;
 
+    // Needs to be changed to the lowest Slim mobo type later on...
+    if (config.mobo_type >= MOTHERBOARD_TYPE_TA088) {
+        ram_size *= 2;
+    }
+
+    ram.resize(ram_size);
 }
 
 void soft_reset() {
@@ -62,8 +70,8 @@ void hard_reset() {
         .write32_func = write<u32>,
     };
 
-    kanacore::get_sc_bus_ptr()->map(RAM_ADDR, RAM_SIZE, page_desc);
-    kanacore::get_me_bus_ptr()->map(RAM_ADDR, RAM_SIZE, page_desc);
+    kanacore::get_sc_bus_ptr()->map(RAM_ADDR, ram_size, page_desc);
+    kanacore::get_me_bus_ptr()->map(RAM_ADDR, ram_size, page_desc);
 }
 
 void shutdown() {

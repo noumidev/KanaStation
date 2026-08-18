@@ -31,8 +31,16 @@ using namespace common;
 constexpr u64 SYSCTRL_ADDR = 0x1C100000;
 constexpr u64 SYSCTRL_SIZE = 0x1000;
 
-constexpr u32 TACHYON_VERSION = 0x40000000;
-constexpr u32 RAM_SIZE = 1;
+constexpr u32 TACHYON_VERSIONS[] = {
+    0x40000000, // TA-082
+    0x50000000, // TA-088v1/v2
+};
+
+// Are those per-console or per-mobo, or..?
+constexpr u32 FUSE_CONFIGS[] = {
+    0x0000590B, // TA-082
+    0x00002D00, // TA-088v1/v2
+};
 
 enum IoAddress {
     IO_ADDRESS_NMIEN      = SYSCTRL_ADDR + 0x000,
@@ -105,7 +113,9 @@ static struct {
     u32 connection_status;
     u32 pll_multiplier;
 
+    u32 tachyon_version;
     u64 fuse_id;
+    u32 fuse_config;
 } ctx;
 
 static void reset_sc() {
@@ -121,8 +131,6 @@ static void reset_me() {
 }
 
 static u32 read(const u32 addr) {
-    constexpr u32 FUSECONFIG = 0x0000590B;
-
     switch (addr) {
         case IoAddress::IO_ADDRESS_NMIEN:
             // For some reason, the boot ROM reads this and thinks an NMI
@@ -177,7 +185,7 @@ static u32 read(const u32 addr) {
             return ctx.fuse_id >> 32;
         case IoAddress::IO_ADDRESS_FUSECONFIG:
             logger->debug("FUSECONFIG read32");
-            return FUSECONFIG;
+            return ctx.fuse_config;
         case IoAddress::IO_ADDRESS_PLLMULT:
             logger->debug("PLLMULT read32");
             return HW_SYSCTRL_PLLMULT;
@@ -330,7 +338,7 @@ static void write(const u32 addr, const u32 data) {
     }
 }
 
-void initialize(const u64 fuse_id) {
+void initialize(const Configuration config) {
     logger = spdlog::stdout_color_st("SysCtrl");
 
     reset_funcs.fill(nullptr);
@@ -340,14 +348,25 @@ void initialize(const u64 fuse_id) {
 
     std::memset(&ctx, 0, sizeof(ctx));
 
-    ctx.fuse_id = fuse_id;
+    ctx.tachyon_version = TACHYON_VERSIONS[config.mobo_type];
+    ctx.fuse_config = FUSE_CONFIGS[config.mobo_type];
+
+    ctx.fuse_id = config.fuse_id;
+
+    logger->info(
+        "TACHYON version: {:08X}, fuse ID: {:012X}, fuse config: {:04X}",
+        ctx.tachyon_version,
+        ctx.fuse_id,
+        ctx.fuse_config
+    );
 }
 
 void soft_reset() {
     HW_SYSCTRL_PLLCTRL = 5;
     HW_SYSCTRL_PLLMULT = 0x01240901;
 
-    HW_SYSCTRL_RAMSIZE = TACHYON_VERSION | RAM_SIZE;
+    HW_SYSCTRL_RAMSIZE  = ctx.tachyon_version;
+    HW_SYSCTRL_RAMSIZE |= (ctx.tachyon_version < 0x50000000) ? 1 : 2;
 }
 
 void hard_reset() {
@@ -360,9 +379,6 @@ void hard_reset() {
     kanacore::get_sc_bus_ptr()->map(SYSCTRL_ADDR, SYSCTRL_SIZE, page_desc);
 
     soft_reset();
-
-    // Things to consider:
-    // Media Engine has its own set of SYSCTRL registers here, how do we deal with this?
 }
 
 void shutdown() {

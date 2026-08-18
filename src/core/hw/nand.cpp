@@ -7,12 +7,12 @@
 
 #include <core/hw/nand.hpp>
 
-#include <array>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -40,8 +40,6 @@ constexpr u64 PAGE_SIZE_WITH_ECC  = PAGE_SIZE + 16;
 constexpr u64 NUM_PAGES_PER_BLOCK = 32;
 
 constexpr u64 BLOCK_SIZE = NUM_PAGES_PER_BLOCK * PAGE_SIZE_WITH_ECC;
-constexpr u64 NUM_BLOCKS = 2048;
-constexpr u64 NAND_SIZE  = NUM_BLOCKS * BLOCK_SIZE;
 
 constexpr int NAND_INTERRUPT = 20;
 
@@ -143,9 +141,12 @@ static struct {
             };
         } interrupt;
     } dma;
+
+    u32 num_blocks;
+    u32 nand_id[2];
 } ctx;
 
-static std::array<u8, NAND_SIZE> nand;
+static std::vector<u8> nand;
 
 static NandState state;
 
@@ -199,6 +200,10 @@ static struct {
     u32 spare_area[(PAGE_SIZE_WITH_ECC - PAGE_SIZE) / sizeof(u32)];
 } dma_buffer;
 
+static inline u64 get_nand_size() {
+    return ctx.num_blocks * BLOCK_SIZE;
+}
+
 static inline void set_nand_lock(const bool lock) {
     logger->debug("Set lock: {}", lock);
 
@@ -249,9 +254,6 @@ static void command_read_status() {
 }
 
 static void command_read_id() {
-    // Every ID byte is padded to 32-bit
-    constexpr u32 NAND_ID[] = {0xEC, 0x35};
-
     logger->debug("READ_ID");
 
     // This absolutely needs to be 0 from what I've seen on hardware.
@@ -261,7 +263,7 @@ static void command_read_id() {
         // this command actually returns five bytes.
         // On my PSP-2000, this returns 0xEC 0x36 0x5A 0x3F 0x74. Nevertheless,
         // until I know what this returns on my PSP-1000, we will return two bytes here
-        nand_buffer.set((u8*)&NAND_ID, sizeof(NAND_ID));
+        nand_buffer.set((u8*)&ctx.nand_id, sizeof(ctx.nand_id));
     } else {
         logger->warn("NAND address is not 0");
         
@@ -545,11 +547,25 @@ static void write_dma_buffer(const u32 addr, const u32 data) {
     logger->debug("DMA buffer write32 @ {:08X} = {:08X}", addr, data);
 }
 
-void initialize(const char* nand_path) {
+void initialize(const Configuration config) {
     logger = spdlog::stdout_color_st("NAND");
 
+    std::memset(&ctx, 0, sizeof(ctx));
+
+    ctx.num_blocks = 2048;
+    ctx.nand_id[0] = 0xEC;
+    ctx.nand_id[1] = 0x35;
+
+    // Needs to be changed to the lowest Slim mobo type later on...
+    if (config.mobo_type >= MotherboardType::MOTHERBOARD_TYPE_TA088) {
+        ctx.num_blocks *= 2;
+        ctx.nand_id[1]  = 0x36;
+    }
+
+    logger->info("Number of blocks: {}, ID: {:02X}{:02X}", ctx.num_blocks, ctx.nand_id[0], ctx.nand_id[1]);
+
     // Load NAND image
-    FILE* file = std::fopen(nand_path, "rb");
+    FILE* file = std::fopen(config.nand_path, "rb");
 
     if (file == nullptr) {
         logger->error("Can't open NAND image");
@@ -559,20 +575,21 @@ void initialize(const char* nand_path) {
     std::fseek(file, 0, SEEK_END);
 
     const u64 file_size = std::ftell(file);
+    const u64 nand_size = get_nand_size();
 
-    if (file_size != NAND_SIZE) {
-        logger->error("Supplied NAND image has invalid size (expected: {}, got: {})", NAND_SIZE, file_size);
+    nand.resize(nand_size);
+
+    if (file_size != nand_size) {
+        logger->error("Supplied NAND image has invalid size (expected: {}, got: {})", nand_size, file_size);
         exit(1);
     }
 
     std::fseek(file, 0, SEEK_SET);
 
-    if (std::fread(nand.data(), sizeof(u8), NAND_SIZE, file) != NAND_SIZE) {
+    if (std::fread(nand.data(), sizeof(u8), nand_size, file) != nand_size) {
         logger->error("Failed to read NAND image");
         exit(1);
     }
-
-    std::memset(&ctx, 0, sizeof(ctx));
 }
 
 void soft_reset() {
