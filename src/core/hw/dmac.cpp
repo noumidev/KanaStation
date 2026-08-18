@@ -139,6 +139,10 @@ struct Dmac {
 };
 
 static struct {
+    bool ms_dma_request;
+    int ms_dma_controller;
+    int ms_dma_chan;
+
     bool audio_dma_request;
     int audio_dma_controller;
     int audio_dma_chan;
@@ -177,6 +181,7 @@ static void assert_terminal_count_interrupt(const u32 channel, const bool mask) 
 }
 
 enum Peripheral {
+    PERIPHERAL_MS        = 1,
     PERIPHERAL_AUDIO_OUT = 5,
 };
 
@@ -185,6 +190,12 @@ static void bind_peripheral_request(const int chan_idx, const bool** request, co
     static_assert(dmac_num < NUM_DMACS);
 
     switch (peripheral) {
+        case Peripheral::PERIPHERAL_MS:
+            *request = &ctx.ms_dma_request;
+
+            ctx.ms_dma_controller = dmac_num;
+            ctx.ms_dma_chan = chan_idx;
+            break;
         case Peripheral::PERIPHERAL_AUDIO_OUT:
             assert((ctx.audio_dma_controller == -1) || (ctx.audio_dma_controller == dmac_num));
             assert((ctx.audio_dma_chan == -1) || (ctx.audio_dma_chan == chan_idx));
@@ -199,9 +210,25 @@ static void bind_peripheral_request(const int chan_idx, const bool** request, co
     }
 }
 
+template<int dmac_num>
+static void unbind_peripheral_request(const int chan_idx) {
+    static_assert(dmac_num < NUM_DMACS);
+
+    if ((ctx.audio_dma_controller == dmac_num) && (ctx.audio_dma_chan == chan_idx)) {
+        ctx.audio_dma_controller = -1;
+        ctx.audio_dma_chan = -1;
+    }
+
+    if ((ctx.ms_dma_controller == dmac_num) && (ctx.ms_dma_chan == chan_idx)) {
+        ctx.ms_dma_controller = -1;
+        ctx.ms_dma_chan = -1;
+    }
+}
+
 enum FlowControl {
     FLOW_CONTROL_MEM_TO_MEM        = 0,
     FLOW_CONTROL_MEM_TO_PERIPHERAL = 1,
+    FLOW_CONTROL_PERIPHERAL_TO_MEM = 2,
 };
 
 template<int dmac_num>
@@ -220,6 +247,10 @@ static void bind_requests(const int chan_idx) {
         case FlowControl::FLOW_CONTROL_MEM_TO_PERIPHERAL:
             chan->source_request = &MEMORY_REQUEST;
             bind_peripheral_request<dmac_num>(chan_idx, &chan->destination_request, HW_DMAC_CHAN_CONFIG.destination_peripheral);
+            break;
+        case FlowControl::FLOW_CONTROL_PERIPHERAL_TO_MEM:
+            chan->destination_request = &MEMORY_REQUEST;
+            bind_peripheral_request<dmac_num>(chan_idx, &chan->source_request, HW_DMAC_CHAN_CONFIG.source_peripheral);
             break;
         default:
             dmac->logger->error("Unimplemented flow control {}", flow_control);
@@ -252,13 +283,15 @@ static void end_transfer(const int chan_idx) {
         HW_DMAC_CHAN_LINKADDR = bus->read<u32>(link_addr + 0x8);
         HW_DMAC_CHAN_CONTROL.raw = bus->read<u32>(link_addr + 0xC);
 
-        if (HW_DMAC_CHAN_CONTROL.transfer_length > 0) {
-            start_transfer<dmac_num>(chan_idx);
-        }
+        assert(HW_DMAC_CHAN_CONTROL.transfer_length > 0);
+
+        start_transfer<dmac_num>(chan_idx);
     } else {
         HW_DMAC_CHAN_CONTROL.transfer_length = 0;
         HW_DMAC_CHAN_CONFIG.active = 0;
         HW_DMAC_CHAN_CONFIG.channel_enable = 0;
+
+        unbind_peripheral_request<dmac_num>(chan_idx);
     }
 }
 
@@ -534,6 +567,31 @@ void assert_audio_dma_request() {
 
 void clear_audio_dma_request() {
     ctx.audio_dma_request = false;
+}
+
+void assert_ms_dma_request() {
+    const bool old_request = ctx.ms_dma_request;
+
+    ctx.ms_dma_request = true;
+
+    if (!old_request && (ctx.ms_dma_controller != -1) && (ctx.ms_dma_chan != -1)) {
+        Dmac* dmac = &dmacs[ctx.ms_dma_controller];
+        auto* chan = &dmac->channels[ctx.ms_dma_chan];
+
+        if (!chan->configuration.channel_enable) {
+            return;
+        }
+    
+        if (ctx.ms_dma_controller == 0) {
+            start_transfer<0>(ctx.ms_dma_chan);
+        } else if (ctx.ms_dma_controller == 1) {
+            start_transfer<1>(ctx.ms_dma_chan);
+        }
+    }
+}
+
+void clear_ms_dma_request() {
+    ctx.ms_dma_request = false;
 }
 
 };

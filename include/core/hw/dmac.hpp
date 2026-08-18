@@ -17,4 +17,7 @@ void shutdown();
 void assert_audio_dma_request();
 void clear_audio_dma_request();
 
+void assert_ms_dma_request();
+void clear_ms_dma_request();
+
 };
