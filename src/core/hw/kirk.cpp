@@ -20,6 +20,8 @@
 #include <cryptopp/eccrypto.h>
 #include <cryptopp/integer.h>
 #include <cryptopp/modes.h>
+#include <cryptopp/oids.h>
+#include <cryptopp/osrng.h>
 #include <cryptopp/sha.h>
 
 #include <spdlog/spdlog.h>
@@ -740,12 +742,21 @@ static i32 command_hash() {
 static i32 command_prng() {
     constexpr u64 OUTPUT_SIZE = 0x14;
 
-    u8 buf[OUTPUT_SIZE] = {};
-
     logger->debug("PRNG");
 
-    // This command would generate an ECDSA private key for use as random data
-    dma_write(HW_KIRK_DSTADDR, buf, OUTPUT_SIZE);
+    std::vector<u8> buf(OUTPUT_SIZE);
+
+    // This command generates an ECDSA private key for use as random data.
+    // Not exactly how KIRK does it, but it should be good enough
+    AutoSeededRandomPool rng;
+
+    auto curve = ASN1::secp256r1();
+    auto private_key = ECDSA<ECP, SHA1>::PrivateKey();
+
+    private_key.Initialize(rng, curve);
+    private_key.GetPrivateExponent().Encode(buf.data(), buf.size());
+
+    dma_write(HW_KIRK_DSTADDR, buf.data(), OUTPUT_SIZE);
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
