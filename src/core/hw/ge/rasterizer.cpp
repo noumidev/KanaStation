@@ -222,7 +222,7 @@ union ClutColor {
     u32 full;
 };
 
-static struct {
+static struct Context {
     u32 base;
     u32 vertex_addr;
     u32 index_addr;
@@ -270,7 +270,7 @@ static struct {
 
     f32 weights[NUM_MORPH_WEIGHTS];
 
-    struct {
+    struct Lighting {
         bool enable;
         Color model_colors[4];
         Color ambient_color;
@@ -279,7 +279,7 @@ static struct {
         bool use_vertex_diffuse;
         bool use_vertex_specular;
 
-        struct {
+        struct Light {
             bool enable;
             f32 x, y, z;
             f32 dx, dy, dz;
@@ -325,7 +325,10 @@ static struct {
         u32 height;
     } texture[8];
 
+    u32 u_light, v_light;
+    u32 texture_mapping_mode;
     u32 texture_format;
+    bool fast_mode;
 
     struct {
         u32 addr;
@@ -370,6 +373,27 @@ static struct {
         bool enable;
         int matrix[4][4];
     } dithering;
+
+    struct {
+        struct {
+            u32 addr;
+            u32 width;
+        } source_buffer, destination_buffer;
+
+        u32 sx1, sx2;
+        u32 sy1, sy2;
+        u32 width, height;
+    } transfer;
+
+    struct {
+        bool enable;
+
+        bool color_enable;
+        bool alpha_enable;
+        bool depth_enable;
+    } clear_mode;
+
+    bool render_splines;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
@@ -466,10 +490,12 @@ static int get_vertex_size() {
     return size;
 }
 
-void initialize() {
+void initialize(const Configuration config) {
     logger = spdlog::stdout_color_st("Rasterizer");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    ctx.render_splines = config.render_splines;
 }
 
 void soft_reset() {
@@ -758,6 +784,83 @@ void set_ambient_alpha(const u32 data) {
     logger->debug("Global Ambient alpha: {:02X}", ambient_color.a);
 }
 
+void set_light_vector(const u32 light_idx, const u32 idx, const f32 data) {
+    assert(light_idx < NUM_LIGHTS);
+    assert(idx < 3);
+
+    auto& light = ctx.lighting.light[light_idx];
+
+    switch (idx) {
+        case 0:
+            light.x = data;
+            break;
+        case 1:
+            light.y = data;
+            break;
+        case 2:
+            light.z = data;
+            break;
+    }
+}
+
+void set_light_direction(const u32 light_idx, const u32 idx, const f32 data) {
+    assert(light_idx < NUM_LIGHTS);
+    assert(idx < 3);
+
+    auto& light = ctx.lighting.light[light_idx];
+
+    switch (idx) {
+        case 0:
+            light.dx = data;
+            break;
+        case 1:
+            light.dy = data;
+            break;
+        case 2:
+            light.dz = data;
+            break;
+    }
+}
+
+void set_light_attenuation_factor(const u32 light_idx, const u32 idx, const f32 data) {
+    assert(light_idx < NUM_LIGHTS);
+    assert(idx < 3);
+
+    auto& light = ctx.lighting.light[light_idx];
+
+    light.attenuation_factors[idx] = data;
+}
+
+void set_light_convergence_factor(const u32 light_idx, const f32 data) {
+    assert(light_idx < NUM_LIGHTS);
+
+    auto& light = ctx.lighting.light[light_idx];
+
+    light.convergence_factor = data;
+}
+
+void set_light_cutoff_coefficient(const u32 light_idx, const f32 data) {
+    assert(light_idx < NUM_LIGHTS);
+
+    auto& light = ctx.lighting.light[light_idx];
+
+    light.cutoff_coefficient = data;
+}
+
+void set_light_color(const u32 light_idx, const u32 idx, const u32 data) {
+    constexpr const char* LIGHT_COLOR_NAMES[] = {
+        "Ambient", "Diffuse", "Specular",
+    };
+
+    assert(idx < 3);
+
+    Color& light_color = ctx.lighting.light[light_idx].colors[idx];
+
+    light_color.raw = data;
+
+    logger->debug("Light {} {} color: {:08X}", light_idx, LIGHT_COLOR_NAMES[idx], light_color.raw);
+}
+
 void set_framebuffer_base(const u32 addr_lo) {
     assert((addr_lo & 0x1FFF) == 0);
 
@@ -869,6 +972,66 @@ void set_clut_base_hi(const u32 addr_hi) {
     logger->debug("Color LUT address; {:08X}", addr);
 }
 
+void set_source_buffer_base(const u32 addr_lo) {
+    u32& addr = ctx.transfer.source_buffer.addr;
+
+    addr &= ~0xFFFFFF;
+    addr |= addr_lo & ~0xF;
+
+    logger->debug("Source buffer address: {:08X}", addr);
+}
+
+void set_source_buffer_width(const u32 addr_hi, const u32 width) {
+    if (width == 0) {
+        // On boot, all GE regs are cleared to 0. We ignore this here
+        return;
+    }
+
+    assert((width >= 8) && (width <= 1024));
+
+    auto& source_buffer = ctx.transfer.source_buffer;
+
+    u32& addr = source_buffer.addr;
+
+    addr &= ~0xFF000000;
+    addr |= addr_hi;
+
+    source_buffer.width = width;
+
+    logger->debug("Source buffer address: {:08X}", addr);
+    logger->debug("Source buffer width: {}", source_buffer.width);
+}
+
+void set_destination_buffer_base(const u32 addr_lo) {
+    u32& addr = ctx.transfer.destination_buffer.addr;
+
+    addr &= ~0xFFFFFF;
+    addr |= addr_lo & ~0xF;
+
+    logger->debug("Destination buffer address: {:08X}", addr);
+}
+
+void set_destination_buffer_width(const u32 addr_hi, const u32 width) {
+    if (width == 0) {
+        // On boot, all GE regs are cleared to 0. We ignore this here
+        return;
+    }
+
+    assert((width >= 8) && (width <= 1024));
+
+    auto& destination_buffer = ctx.transfer.destination_buffer;
+
+    u32& addr = destination_buffer.addr;
+
+    addr &= ~0xFF000000;
+    addr |= addr_hi;
+
+    destination_buffer.width = width;
+
+    logger->debug("Destination buffer address: {:08X}", addr);
+    logger->debug("Destination buffer width: {}", destination_buffer.width);
+}
+
 void set_texture_size(const u32 idx, const u32 width, const u32 height) {
     assert(idx < 8);
     assert((width <= 9) && (height <= 9));
@@ -881,10 +1044,23 @@ void set_texture_size(const u32 idx, const u32 width, const u32 height) {
     logger->debug("Texture {} dimensions: ({}, {})", idx, texture.width, texture.height);
 }
 
+void set_shade_mapping(const u32 u_light, const u32 v_light) {
+    ctx.u_light = u_light;
+    ctx.v_light = v_light;
+}
+
+void set_texture_mapping_mode(const u32 mode) {
+    ctx.texture_mapping_mode = mode;
+}
+
 void set_texture_format(const u32 format) {
     ctx.texture_format = format;
 
     logger->debug("Texture format: {}", format);
+}
+
+void set_fast_mode(const bool enable) {
+    ctx.fast_mode = enable;
 }
 
 void load_clut(const u32 num_palettes) {
@@ -940,6 +1116,22 @@ void set_texture_blend_params(const u32 data) {
 
     blend_params.func = data & 7;
     blend_params.use_tex_alpha = (data & 0x80) != 0;
+}
+
+void set_clear_mode(const u32 data) {
+    auto &clear_mode = ctx.clear_mode;
+
+    clear_mode.enable = (data & 1) != 0;
+
+    clear_mode.color_enable = ((data >>  8) & 1) != 0;
+    clear_mode.alpha_enable = ((data >>  9) & 1) != 0;
+    clear_mode.depth_enable = ((data >> 10) & 1) != 0;
+
+    logger->debug(
+        "Clear mode: {} (CEN: {}, AEN: {}, ZEN: {})",
+        clear_mode.enable,
+        clear_mode.color_enable, clear_mode.alpha_enable, clear_mode.depth_enable
+    );
 }
 
 void set_scissor_upper(const u32 data) {
@@ -1029,6 +1221,10 @@ void set_dither_matrix(const u32 idx, const u32 data) {
     matrix[3][idx] = ((int)data << 16) >> 28;
 }
 
+void set_depth_mask_enable(const bool enable) {
+    ctx.depth_buffer.mask = enable;
+}
+
 void set_color_mask(const u32 data) {
     assert(data == 0);
 
@@ -1039,6 +1235,49 @@ void set_alpha_mask(const u32 data) {
     assert(data == 0);
 
     logger->debug("Alpha mask: {:02X}", data);
+}
+
+void start_transfer(const bool is_full_color) {
+    assert(is_full_color);
+
+    bus::Bus* bus = kanacore::get_sc_bus_ptr();
+
+    auto& transfer = ctx.transfer;
+
+    auto& src_buffer = transfer.source_buffer;
+    auto& dst_buffer = transfer.destination_buffer;
+
+    for (u32 y = 0; y <= transfer.height; y++) {
+        for (u32 x = 0; x <= transfer.width; x++) {
+            bus->write<u32>(
+                dst_buffer.addr + sizeof(u32) * ((transfer.sy2 + y) * dst_buffer.width + (transfer.sx2 + x)),
+                bus->read<u32>(
+                    src_buffer.addr + sizeof(u32) * ((transfer.sy1 + y) * src_buffer.width + (transfer.sx1 + x))
+                )
+            );
+        }
+    }
+}
+
+void set_source_buffer_start(const u32 data) {
+    auto &transfer = ctx.transfer;
+
+    transfer.sx1 = (data >>  0) & 0x3FF;
+    transfer.sy1 = (data >> 10) & 0x3FF;
+}
+
+void set_destination_buffer_start(const u32 data) {
+    auto &transfer = ctx.transfer;
+
+    transfer.sx2 = (data >>  0) & 0x3FF;
+    transfer.sy2 = (data >> 10) & 0x3FF;
+}
+
+void set_transfer_size(const u32 data) {
+    auto &transfer = ctx.transfer;
+
+    transfer.width  = (data >>  0) & 0x3FF;
+    transfer.height = (data >> 10) & 0x3FF;
 }
 
 u32 get_base() {
@@ -1150,19 +1389,12 @@ static inline u8 color_multiply(const int src_color, const int dst_color) {
 static void calculate_lighting(std::vector<Vertex>& vertices) {
     auto& lighting = ctx.lighting;
 
-    const bool has_colors = ctx.vertex_type.color_type != ColorType::COLOR_TYPE_NONE;
-
     for (Vertex& vertex : vertices) {
         Color final_color, vertex_color{ .r = (u8)vertex.r, .g = (u8)vertex.g, .b = (u8)vertex.b, .a = (u8)vertex.a };
 
         if (lighting.enable) {
             // Set color to model emission color + global ambient
             final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
-        } else if (!has_colors) {
-            // Use model ambient color if there is no color data
-            final_color = lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
-
-            vertex.has_colors = true;
         }
 
         vertex.r = final_color.r;
@@ -1200,6 +1432,12 @@ static Vertex fetch_vertex(u32 addr) {
 
     switch (texcoord_type) {
         case TexcoordType::TEXCOORD_TYPE_NONE:
+            break;
+        case TexcoordType::TEXCOORD_TYPE_FP16:
+            vertex.s = (f32)(u16)bus->read<u16>(addr + 0);
+            vertex.t = (f32)(u16)bus->read<u16>(addr + 2);
+
+            addr += 2 * sizeof(u16);
             break;
         case TexcoordType::TEXCOORD_TYPE_F32:
             vertex.s = from_u32(bus->read<u32>(addr + 0));
@@ -1279,6 +1517,44 @@ static Vertex fetch_vertex(u32 addr) {
     return vertex;
 }
 
+static inline f32 vec3_length(const f32 x, const f32 y, const f32 z) {
+    return std::sqrtf(x * x + y * y + z * z);
+}
+
+static f32 get_shade_intensity(
+    const Context::Lighting::Light& light, 
+    const f32 nx, const f32 ny, const f32 nz, 
+    const f32 n_length
+) {
+    const f32 lv_length = vec3_length(light.x, light.y, light.z);
+
+    if ((n_length == 0) || (lv_length == 0)) {
+        return 0;
+    }
+
+    const f32 dot = (light.x * nx + light.y * ny + light.z * nz);
+    const f32 intensity = dot / (lv_length * n_length);
+
+    return intensity;
+}
+
+static void get_shade_coords(std::vector<Vertex>& vertices) {
+    const auto& u_light = ctx.lighting.light[ctx.u_light];
+    const auto& v_light = ctx.lighting.light[ctx.v_light];
+
+    for (Vertex& vertex : vertices) {
+        const f32 nx = vertex.nx;
+        const f32 ny = vertex.ny;
+        const f32 nz = vertex.nz;
+        const f32 n_length = vec3_length(nx, ny, nz);
+
+        const f32 pu = get_shade_intensity(u_light, nx, ny, nz, n_length);
+        const f32 pv = get_shade_intensity(v_light, nx, ny, nz, n_length);
+
+        vertex.s = (pu + 1) * 0.5;
+        vertex.t = (pv + 1) * 0.5;
+    }
+}
 
 static void transform_and_lighting(std::vector<Vertex>& vertices, const bool is_rectangle = false) {
     const bool through_mode = ctx.vertex_type.through_mode;
@@ -1287,16 +1563,16 @@ static void transform_and_lighting(std::vector<Vertex>& vertices, const bool is_
     if (!through_mode && !is_rectangle) {
         // In normal mode, the GE performs a buuuunch of vertex transformations...
         transform_3d(vertices, ge::get_world_matrix());
-
-        calculate_lighting(vertices);
-
         transform_3d(vertices, ge::get_view_matrix());
         transform_4d(vertices, ge::get_perspective_matrix());
         viewport_transform(vertices);
-    }
-
-    if (!is_rectangle) {
         screen_transform(vertices);
+
+        calculate_lighting(vertices);
+
+        if (ctx.texture_mapping_mode == 2) {
+            get_shade_coords(vertices);
+        }
     }
 }
 
@@ -1473,12 +1749,35 @@ static u32 fetch_texel(const u32 u, const u32 v) {
     const u32 tex0_buf_width = ctx.texture[0].buf_width;
 
     switch (ctx.texture_format) {
-        case TexelFormat::TEXEL_FORMAT_RGBA8888:
-            return bus->read<u32>(tex0_addr + swizzle_to_linear(u, v, tex0_buf_width, 32));
-        case TexelFormat::TEXEL_FORMAT_IDX4:
-            return fetch_clut(((bus->read<u8>(tex0_addr + swizzle_to_linear(u, v, tex0_buf_width, 4))) >> (4 * (u & 1))) & 0xF);
-        case TexelFormat::TEXEL_FORMAT_IDX8:
-            return fetch_clut(bus->read<u8>(tex0_addr + swizzle_to_linear(u, v, tex0_buf_width, 8)));
+        case TexelFormat::TEXEL_FORMAT_RGBA8888: {
+            u32 offset = sizeof(u32) * (v * tex0_buf_width + u);
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 32);
+            }
+
+            return bus->read<u32>(tex0_addr + offset);
+        }
+        case TexelFormat::TEXEL_FORMAT_IDX4: {
+            u32 offset = (v * tex0_buf_width + u) / 2;
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 4);
+            }
+
+            const u32 u_offset = 4 * (u & 1);
+
+            return fetch_clut((bus->read<u8>(tex0_addr + offset) >> u_offset) & 0xF);
+        }
+        case TexelFormat::TEXEL_FORMAT_IDX8: {
+            u32 offset = v * tex0_buf_width + u;
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 8);
+            }
+
+            return fetch_clut(bus->read<u8>(tex0_addr + offset));
+        }
         default:
             logger->error("Unimplemented texture format {}", TEXEL_FORMAT_NAMES[ctx.texture_format]);
             exit(1);
@@ -1496,12 +1795,18 @@ static u32 read_framebuffer(const u32 x, const u32 y) {
     return bus->read<u32>(framebuffer.addr + sizeof(u32) * (y * framebuffer.width + x));
 }
 
+static std::array<u16, 480 * 272> z_buffer;
+
 static u16 read_depth_buffer(const u32 x, const u32 y) {
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
     const auto& depth_buffer = ctx.depth_buffer;
 
-    return bus->read<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x));
+    // return bus->read<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x));
+
+    // I've had some issues with depth buffers corrupting some memory allocator's
+    // state in VRAM, so for now we will render to this external buffer
+    return z_buffer[y * 480 + x];
 }
 
 static void write_framebuffer(const u32 x, const u32 y, const u32 color) {
@@ -1518,16 +1823,9 @@ static void write_depth_buffer(const u32 x, const u32 y, const u16 depth) {
 
     const auto& depth_buffer = ctx.depth_buffer;
 
-    bus->write<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x), depth);
-}
+    //bus->write<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x), depth);
 
-static void clear_buffers() {
-    for (u32 y = 0; y < 272; y++) {
-        for (u32 x = 0; x < 480; x++) {
-            write_framebuffer(x, y, 0);
-            write_depth_buffer(x, y, 0);
-        }
-    }
+    z_buffer[y * 480 + x] = depth;
 }
 
 static bool depth_range_test(const u16 depth) {
@@ -1620,10 +1918,6 @@ static bool depth_test(const u32 x, const u32 y, const u16 depth) {
     return true;
 }
 
-constexpr const char* BLEND_INPUT_NAMES[] = {
-
-};
-
 static Color blend(const Color color, const u32 x, const u32 y) {
     auto& blend_params = ctx.blend_params;
 
@@ -1650,6 +1944,10 @@ static Color blend(const Color color, const u32 x, const u32 y) {
             a_color.g = src_color.a;
             a_color.b = src_color.a;
             a_color.a = src_color.a;
+            break;
+        case 10:
+            // FIXA
+            a_color = ctx.blend_params.fixa;
             break;
         default:
             logger->error("Unimplemented blend source input {}", blend_params.src_input);
@@ -1750,6 +2048,126 @@ static u32 tex_sample_bilinear(const f32 u, const f32 v) {
     }.raw;
 }
 
+static void draw_rectangle(const Vertex a, const Vertex b) {
+    logger->trace(
+        "Rectangle ({}, {}, {}), ({}, {}, {})",
+        a.x, a.y, a.z,
+        b.x, b.y, b.z
+    );
+
+    if (ctx.clear_mode.enable) {
+        assert(ctx.clear_mode.color_enable);
+        assert(ctx.clear_mode.alpha_enable);
+    }
+
+    const int x_min = std::round(std::max(std::min(a.x, b.x), (f32)ctx.scissor.sx1));
+    const int x_max = std::round(std::min(std::max(a.x, b.x), (f32)ctx.scissor.sx2));
+    const int y_min = std::round(std::max(std::min(a.y, b.y), (f32)ctx.scissor.sy1));
+    const int y_max = std::round(std::min(std::max(a.y, b.y), (f32)ctx.scissor.sy2));
+
+    logger->trace("Bounding box: ({}, {}), ({}, {})", x_min, y_min, x_max, y_max);
+
+    if ((x_min >= x_max) || (y_min >= y_max)) {
+        return;
+    }
+
+    Color vertex_color, final_color;
+
+    if (b.has_colors) {
+        // Rectangles use the color and depth of the second vertex
+        vertex_color.r = b.r;
+        vertex_color.g = b.g;
+        vertex_color.b = b.b;
+        vertex_color.a = b.a;
+    } else {
+        // Use model ambient color if there is no color data
+        vertex_color = ctx.lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
+    }
+
+    const u16 z = (u16)b.z;
+
+    const f32 ds = (b.s - a.s) / (b.x - a.x);
+    const f32 dt = (b.t - a.t) / (b.y - a.y);
+
+    for (int y = y_min; y <= y_max; y++) {
+        for (int x = x_min; x <= x_max; x++) {
+            if (ctx.texture_mapping_enable && !ctx.clear_mode.enable) {
+                f32 s, t;
+                f32 u, v;
+
+                if (!ctx.vertex_type.through_mode) {
+                    switch (ctx.texture_mapping_mode) {
+                        case 0: {
+                            // UV mapping
+                            s = a.s + ds * (x - a.x);
+                            t = a.t + dt * (y - a.y);
+
+                            s = s * ctx.texture_scale[0] + ctx.texture_offset[0];
+                            t = t * ctx.texture_scale[1] + ctx.texture_offset[1];
+                            break;
+                        }
+                        default:
+                            logger->error("Unimplemented texture mapping mode {}", ctx.texture_mapping_mode);
+                            exit(1);
+                    }
+
+                    // TODO: implement wrapping
+                    // Clamp S
+                    if (s < 0.0) {
+                        s = 0.0;
+                    } else if (s > 1.0) {
+                        s = 1.0;
+                    }
+
+                    // Clamp T
+                    if (t < 0.0) {
+                        t = 0.0;
+                    } else if (t > 1.0) {
+                        t = 1.0;
+                    }
+
+                    u = s * (ctx.texture[0].width  - 1);
+                    v = t * (ctx.texture[0].height - 1);
+                } else {
+                    // Maybe?
+                    u = a.s + ds * (x - a.x);
+                    v = a.t + dt * (y - a.y);
+
+                    // Clamp U
+                    if (u < 0.0) {
+                        u = 0.0;
+                    } else if (u >= ctx.texture[0].width) {
+                        u = ctx.texture[0].width - 1;
+                    }
+
+                    // Clamp V
+                    if (v < 0.0) {
+                        v = 0.0;
+                    } else if (v >= ctx.texture[0].height) {
+                        v = ctx.texture[0].height - 1;
+                    }
+                }
+
+                const Color tex_color { .raw = tex_sample_bilinear(u, v) };
+
+                final_color = blend_texture(vertex_color, tex_color);
+            } else {
+                final_color = vertex_color;
+            }
+            
+            if (!depth_range_test(z)) {
+                continue;
+            }
+
+            write_framebuffer(x, y, final_color.raw);
+
+            if (!ctx.clear_mode.enable || ctx.clear_mode.depth_enable) {
+                write_depth_buffer(x, y, z);
+            }
+        }
+    }
+}
+
 static void draw_triangle(Vertex a, Vertex b, Vertex c) {
     logger->trace(
         "Triangle ({}, {}, {}), ({}, {}, {}), ({}, {}, {})",
@@ -1758,6 +2176,8 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
         c.x, c.y, c.z
     );
 
+    assert(!ctx.clear_mode.enable);
+
     if (edge_function(a, b, c) < 0.0) {
         std::swap(b, c);
     }
@@ -1765,10 +2185,10 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
     const f32 area = edge_function(a, b, c);
 
     // Calculate bounding box
-    const int x_min = std::floor(std::max(std::min(c.x, std::min(a.x, b.x)), (f32)ctx.scissor.sx1));
-    const int x_max = std::floor(std::min(std::max(c.x, std::max(a.x, b.x)), (f32)ctx.scissor.sx2));
-    const int y_min = std::floor(std::max(std::min(c.y, std::min(a.y, b.y)), (f32)ctx.scissor.sy1));
-    const int y_max = std::floor(std::min(std::max(c.y, std::max(a.y, b.y)), (f32)ctx.scissor.sy2));
+    const int x_min = std::round(std::max(std::min(c.x, std::min(a.x, b.x)), (f32)ctx.scissor.sx1));
+    const int x_max = std::round(std::min(std::max(c.x, std::max(a.x, b.x)), (f32)ctx.scissor.sx2));
+    const int y_min = std::round(std::max(std::min(c.y, std::min(a.y, b.y)), (f32)ctx.scissor.sy1));
+    const int y_max = std::round(std::min(std::max(c.y, std::max(a.y, b.y)), (f32)ctx.scissor.sy2));
 
     logger->trace("Bounding box: ({}, {}), ({}, {})", x_min, y_min, x_max, y_max);
 
@@ -1798,45 +2218,68 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
                 Color vertex_color, final_color;
 
-                assert(a.has_colors);
-
-                if (ctx.gouraud_shading_enable) {
-                    vertex_color.r = interpolate(w0, w1, w2, a.r, b.r, c.r, area);
-                    vertex_color.g = interpolate(w0, w1, w2, a.g, b.g, c.g, area);
-                    vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
-                    vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
+                if (a.has_colors) {
+                    if (ctx.gouraud_shading_enable) {
+                        vertex_color.r = interpolate(w0, w1, w2, a.r, b.r, c.r, area);
+                        vertex_color.g = interpolate(w0, w1, w2, a.g, b.g, c.g, area);
+                        vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
+                        vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
+                    } else {
+                        vertex_color.r = c.r;
+                        vertex_color.g = c.g;
+                        vertex_color.b = c.b;
+                        vertex_color.a = c.a;
+                    }
                 } else {
-                    vertex_color.r = c.r;
-                    vertex_color.g = c.g;
-                    vertex_color.b = c.b;
-                    vertex_color.a = c.a;
+                    // Use model ambient color if there is no color data
+                    vertex_color = ctx.lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
                 }
 
-                if (ctx.texture_mapping_enable && a.has_texcoords) {
+                if (ctx.texture_mapping_enable) {
                     f32 s, t;
+                    f32 u, v;
 
-                    st_interpolate(w0, w1, w2, a, b, c, &s, &t);
+                    if (!ctx.vertex_type.through_mode) {
+                        switch (ctx.texture_mapping_mode) {
+                            case 0: {
+                                // UV mapping
+                                st_interpolate(w0, w1, w2, a, b, c, &s, &t);
 
-                    s = s * ctx.texture_scale[0] + ctx.texture_offset[0];
-                    t = t * ctx.texture_scale[1] + ctx.texture_offset[1];
+                                s = s * ctx.texture_scale[0] + ctx.texture_offset[0];
+                                t = t * ctx.texture_scale[1] + ctx.texture_offset[1];
+                                break;
+                            }
+                            case 2: {
+                                // Shade mapping
+                                st_interpolate(w0, w1, w2, a, b, c, &s, &t);
+                                break;
+                            }
+                            default:
+                                logger->error("Unimplemented texture mapping mode {}", ctx.texture_mapping_mode);
+                                exit(1);
+                        }
 
-                    // TODO: implement wrapping
-                    // Clamp S
-                    if (s < 0.0) {
-                        s = 0.0;
-                    } else if (s > 1.0) {
-                        s = 1.0;
+                        // TODO: implement wrapping
+                        // Clamp S
+                        if (s < 0.0) {
+                            s = 0.0;
+                        } else if (s > 1.0) {
+                            s = 1.0;
+                        }
+
+                        // Clamp T
+                        if (t < 0.0) {
+                            t = 0.0;
+                        } else if (t > 1.0) {
+                            t = 1.0;
+                        }
+
+                        u = s * (ctx.texture[0].width  - 1);
+                        v = t * (ctx.texture[0].height - 1);
+                    } else {
+                        u = interpolate(w0, w1, w2, a.s, b.s, c.s, area);
+                        v = interpolate(w0, w1, w2, a.t, b.t, c.t, area);
                     }
-
-                    // Clamp T
-                    if (t < 0.0) {
-                        t = 0.0;
-                    } else if (t > 1.0) {
-                        t = 1.0;
-                    }
-
-                    const f32 u = s * (ctx.texture[0].width  - 1);
-                    const f32 v = t * (ctx.texture[0].height - 1);
 
                     const Color tex_color { .raw = tex_sample_bilinear(u, v) };
 
@@ -1886,15 +2329,17 @@ void draw_primitive(const u32 count, const u32 prim_type) {
             }
             break;
         }
+        case PrimType::PRIM_TYPE_RECTANGLE: {
+            assert((count & 1) == 0);
+
+            for (u32 i = 0; i < count; i += 2) {
+                draw_rectangle(vertices[i + 0], vertices[i + 1]);
+            }
+            break;
+        }
         default:
             logger->warn("Unimplemented primitive type {}", PRIMITIVE_NAMES[prim_type]);
             break;
-    }
-
-    if (is_rectangle) {
-        // Massive hack, we need to check for clear mode and actually draw
-        // rectangles at some point :D
-        clear_buffers();
     }
 }
 
@@ -1996,9 +2441,15 @@ static void draw_bezier_patch(
             Vertex& b = vertices[(v + 0) * (u_div + 1) + (u + 1)];
             Vertex& c = vertices[(v + 1) * (u_div + 1) + (u + 0)];
             Vertex& d = vertices[(v + 1) * (u_div + 1) + (u + 1)];
-            
-            draw_triangle(a, b, c);
-            draw_triangle(c, b, d);
+
+            // Not technically correct, but it'll remind me to properly implement this...
+            if (!ctx.patch_control.is_ccw) {
+                draw_triangle(a, b, c);
+                draw_triangle(c, b, d);
+            } else {
+                draw_triangle(a, c, b);
+                draw_triangle(c, d, b);
+            }
         }
     }
 }
@@ -2095,6 +2546,35 @@ static f32 get_basis_spline_value(const int i, const int j, const f32 x, const s
         w1 * get_basis_spline_value(i + 1, j - 1, x, knots);
 }
 
+// We need this to calculate surface normals. No clue if this is even correct
+static f32 get_basis_spline_derivative(const int i, const int j, const f32 x, const std::vector<int>& knots) {
+    if (j == 0) {
+        return 0;
+    }
+
+    f32 halves[2] = {};
+
+    if ((knots[i + j] - knots[i]) != 0) {
+        halves[0] = (j * get_basis_spline_value(i, j - 1, x, knots)) / (knots[i + j] - knots[i]);
+    }
+
+    if ((knots[i + j + 1] - knots[i + 1]) != 0) {
+        halves[1] = (j * get_basis_spline_value(i + 1, j - 1, x, knots)) / (knots[i + j + 1] - knots[i + 1]);
+    }
+
+    return halves[0] - halves[1];
+}
+
+f32 get_spline_param(const u32 step, const u32 div, const u32 patch_idx) {
+    if (step == 0) {
+        return patch_idx;
+    } else if (step == div) {
+        return patch_idx + 1;
+    } else {
+        return patch_idx + (f32)step / (f32)div;
+    }
+}
+
 static void draw_spline_patch(
     const std::vector<Vertex>& control_points,
     const u32 patch_u,
@@ -2123,18 +2603,27 @@ static void draw_spline_patch(
     const std::vector<int> u_knots = get_knots(n, u_knot_type);
     const std::vector<int> v_knots = get_knots(m, v_knot_type);
 
-    const f32 u_sub = 1.0 / u_div;
-    const f32 v_sub = 1.0 / v_div;
+    const bool has_normals = ctx.vertex_type.normal_type != NormalType::NORMAL_TYPE_NONE;
 
     // Tessellate the patch
     for (u32 v = 0; v <= v_div; v++) {
+        const f32 param_v = get_spline_param(v, v_div, patch_v);
+
         for (u32 u = 0; u <= u_div; u++) {
+            const f32 param_u = get_spline_param(u, u_div, patch_u);
+
             Vertex& vertex = vertices[v * (u_div + 1) + u];
+            
+            // When the control points don't have normals, we
+            // need to generate them ourselves
+            f32 tu_x = 0, tu_y = 0, tu_z = 0;
+            f32 tv_x = 0, tv_y = 0, tv_z = 0;
 
             for (int i = 0; i < 4; i++) {
+                const f32 spline_u = get_basis_spline_value(i + patch_u, 3, param_u, u_knots);
+
                 for (int j = 0; j < 4; j++) {
-                    const f32 spline_u = get_basis_spline_value(i + patch_u, 3, patch_u + u * u_sub, u_knots);
-                    const f32 spline_v = get_basis_spline_value(j + patch_v, 3, patch_v + v * v_sub, v_knots);
+                    const f32 spline_v = get_basis_spline_value(j + patch_v, 3, param_v, v_knots);
 
                     const Vertex& control_point = control_points[(patch_v + j) * u_count + patch_u + i];
 
@@ -2150,13 +2639,46 @@ static void draw_spline_patch(
 
                         vertex.has_colors = true;
                     }
+
+                    if (has_normals) {
+                        vertex.nx += spline_u * spline_v * control_point.nx;
+                        vertex.ny += spline_u * spline_v * control_point.ny;
+                        vertex.nz += spline_u * spline_v * control_point.nz;
+                    } else {
+                        const f32 d_spline_u = get_basis_spline_derivative(i + patch_u, 3, param_u, u_knots);
+                        const f32 d_spline_v = get_basis_spline_derivative(j + patch_v, 3, param_v, v_knots);
+
+                        tu_x += d_spline_u * spline_v * control_point.x;
+                        tu_y += d_spline_u * spline_v * control_point.y;
+                        tu_z += d_spline_u * spline_v * control_point.z;
+                        tv_x += spline_u * d_spline_v * control_point.x;
+                        tv_y += spline_u * d_spline_v * control_point.y;
+                        tv_z += spline_u * d_spline_v * control_point.z;
+                    }
                 }
             }
+
+            if (!has_normals) {
+                f32 nx = tu_y * tv_z - tu_z * tv_y;
+                f32 ny = tu_z * tv_x - tu_x * tv_z;
+                f32 nz = tu_x * tv_y - tu_y * tv_x;
+
+                if (ctx.patch_control.is_ccw) {
+                    nx *= -1;
+                    ny *= -1;
+                    nz *= -1;
+                }
+
+                vertex.nx = nx;
+                vertex.ny = ny;
+                vertex.nz = nz;
+            }
+
+            vertex.has_normals = true;
 
             logger->trace("Patch vertex (X: {}, Y: {}, Z: {})", vertex.x, vertex.y, vertex.z);
         }
     }
-
 
     // Now we can apply T&L, otherwise we might not have any surface normals
     // for lighting
@@ -2170,8 +2692,15 @@ static void draw_spline_patch(
             Vertex& c = vertices[(v + 1) * (u_div + 1) + (u + 0)];
             Vertex& d = vertices[(v + 1) * (u_div + 1) + (u + 1)];
             
-            draw_triangle(a, b, c);
-            draw_triangle(c, b, d);
+            // Not technically correct, but it'll remind me to properly implement this...
+            // I think I need to traverse the loop backwards actually?
+            if (!ctx.patch_control.is_ccw) {
+                draw_triangle(a, b, c);
+                draw_triangle(c, b, d);
+            } else {
+                draw_triangle(a, c, b);
+                draw_triangle(c, d, b);
+            }
         }
     }
 }
@@ -2182,9 +2711,9 @@ void draw_spline(const u32 u_count, const u32 v_count, const u32 u_knot_type, co
     assert(u_count >= 4);
     assert(v_count >= 4);
 
-    // The XMB waves rely on shade mapping to look right, so we won't actually
-    // draw splines for now
-    return;
+    if (!ctx.render_splines) {
+        return;
+    }
 
     const std::vector<Vertex> control_points = fetch_vertices(u_count * v_count);
 
@@ -2193,6 +2722,10 @@ void draw_spline(const u32 u_count, const u32 v_count, const u32 u_knot_type, co
             draw_spline_patch(control_points, patch_u, patch_v, u_count, v_count, (KnotType)(u_knot_type & 3), (KnotType)(v_knot_type & 3));
         }
     }
+}
+
+u32 get_fb_addr() {
+    return ctx.framebuffer.addr;
 }
 
 };

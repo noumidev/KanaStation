@@ -128,7 +128,7 @@ void initialize(const Configuration config) {
     hw::allegrex::scratchpad::initialize();
     hw::ge::initialize();
     hw::ge::edram::initialize();
-    hw::ge::rasterizer::initialize();
+    hw::ge::rasterizer::initialize(config);
     hw::me::scratchpad::initialize();
     hw::me::sysctrl::initialize();
     hw::me::vme_dmac::initialize();

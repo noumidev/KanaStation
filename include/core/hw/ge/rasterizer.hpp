@@ -8,10 +8,11 @@
 #pragma once
 
 #include <common/types.hpp>
+#include <core/config.hpp>
 
 namespace kanacore::hw::ge::rasterizer {
 
-void initialize();
+void initialize(const Configuration config);
 void soft_reset();
 void hard_reset();
 void shutdown();
@@ -54,6 +55,12 @@ void set_model_color(const common::u32 idx, const common::u32 data);
 void set_model_alpha(const common::u32 data);
 void set_ambient_color(const common::u32 data);
 void set_ambient_alpha(const common::u32 data);
+void set_light_vector(const common::u32 light_idx, const common::u32 idx, const common::f32 data);
+void set_light_direction(const common::u32 light_idx, const common::u32 idx, const common::f32 data);
+void set_light_attenuation_factor(const common::u32 light_idx, const common::u32 idx, const common::f32 data);
+void set_light_convergence_factor(const common::u32 light_idx, const common::f32 data);
+void set_light_cutoff_coefficient(const common::u32 light_idx, const common::f32 data);
+void set_light_color(const common::u32 light_idx, const common::u32 idx, const common::u32 data);
 void set_framebuffer_base(const common::u32 addr_lo);
 void set_framebuffer_width(const common::u32 width);
 void set_depth_buffer_base(const common::u32 addr_lo);
@@ -62,11 +69,19 @@ void set_texture_base(const common::u32 idx, const common::u32 addr_lo);
 void set_texture_buffer_width(const common::u32 idx, const common::u32 addr_hi, const common::u32 width);
 void set_clut_base_lo(const common::u32 addr_lo);
 void set_clut_base_hi(const common::u32 addr_hi);
+void set_source_buffer_base(const common::u32 addr_lo);
+void set_source_buffer_width(const common::u32 addr_hi, const common::u32 width);
+void set_destination_buffer_base(const common::u32 addr_lo);
+void set_destination_buffer_width(const common::u32 addr_hi, const common::u32 width);
 void set_texture_size(const common::u32 idx, const common::u32 width, const common::u32 height);
+void set_texture_mapping_mode(const common::u32 mode);
+void set_fast_mode(const bool enable);
+void set_shade_mapping(const common::u32 u_light, const common::u32 v_light);
 void set_texture_format(const common::u32 format);
 void load_clut(const common::u32 num_palettes);
 void set_clut(const common::u32 data);
 void set_texture_blend_params(const common::u32 data);
+void set_clear_mode(const common::u32 data);
 void set_scissor_upper(const common::u32 data);
 void set_scissor_lower(const common::u32 data);
 void set_minimum_depth(const common::u16 minz);
@@ -77,12 +92,18 @@ void set_blend_params(const common::u32 data);
 void set_fixed_color_a(const common::u32 data);
 void set_fixed_color_b(const common::u32 data);
 void set_dither_matrix(const common::u32 idx, const common::u32 data);
+void set_depth_mask_enable(const bool enable);
 void set_color_mask(const common::u32 data);
 void set_alpha_mask(const common::u32 data);
+void start_transfer(const bool is_full_color);
+void set_source_buffer_start(const common::u32 data);
+void set_destination_buffer_start(const common::u32 data);
+void set_transfer_size(const common::u32 data);
 
 common::u32 get_base();
 common::u32 get_vertex_addr();
 common::u32 get_index_addr();
+common::u32 get_fb_addr();
 
 void draw_primitive(const common::u32 count, const common::u32 prim_type);
 void draw_bezier(const common::u32 u_count, const common::u32 v_count);
