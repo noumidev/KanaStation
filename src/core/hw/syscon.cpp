@@ -61,12 +61,14 @@ enum SysconCommand {
     SYSCON_COMMAND_READ_ALARM                    = 0x0A,
     SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS       = 0x0B,
     SYSCON_COMMAND_GET_WAKE_UP_FACTOR            = 0x0E,
+    SYSCON_COMMAND_GET_STATUS2                   = 0x10,
     SYSCON_COMMAND_GET_BARYON_TIMESTAMP          = 0x11,
     SYSCON_COMMAND_WRITE_CLOCK                   = 0x20,
     SYSCON_COMMAND_WRITE_ALARM                   = 0x22,
     SYSCON_COMMAND_WRITE_SCRATCHPAD              = 0x23,
     SYSCON_COMMAND_READ_SCRATCHPAD               = 0x24,
     SYSCON_COMMAND_SEND_SETPARAM                 = 0x25,
+    SYSCON_COMMAND_TACHYON_HANDSHAKE             = 0x30,
     SYSCON_COMMAND_CTRL_TACHYON_WDT              = 0x31,
     SYSCON_COMMAND_RESET_DEVICE                  = 0x32,
     SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING        = 0x33,
@@ -109,6 +111,8 @@ static struct {
 
 static std::shared_ptr<spdlog::logger> logger;
 
+static u32 event_id;
+
 static struct {
     u8 buf[BUFFER_SIZE];
 
@@ -145,7 +149,7 @@ static void transmit_data(const int) {
 
     if (ptr < (buf[BufferIndex::BUFFER_INDEX_SIZE] + 1)) {
         scheduler::schedule_event(
-            scheduler::EventType::SYSCON_TX,
+            event_id,
             transmit_data,
             0,
             scheduler::SPI_CLOCKRATE
@@ -161,7 +165,7 @@ static void start_transmission() {
     spi::start_reception();
 
     scheduler::schedule_event(
-        scheduler::EventType::SYSCON_TX,
+        event_id,
         transmit_data,
         0,
         scheduler::SPI_CLOCKRATE
@@ -335,6 +339,15 @@ static void command_get_baryon_version() {
     write_transmit_data((u8*)&ctx.baryon_version, sizeof(u32));
 }
 
+static void command_get_status2() {
+    logger->debug("GET_STATUS2");
+
+    const u8 buf = 0;
+
+    // What does this return?
+    write_transmit_data((u8*)&buf, sizeof(buf));
+}
+
 static void command_read_scratchpad() {
     const u8 idx  = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] >> 2;
     const u8 size = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3;
@@ -354,6 +367,51 @@ static void command_send_setparam() {
     logger->debug("SEND_SETPARAM: {:016X}", setparam);
 
     write_transmit_data(nullptr, 0);
+}
+
+static void command_tachyon_handshake() {
+    const u8* buf = &receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA];
+
+    const u32 exchange = buf[0];
+
+    logger->debug("TACHYON_HANDSHAKE: {:02X}", exchange);
+
+    exit(1);
+
+    static u8 auth_data[8][8] = {};
+
+    switch (exchange) {
+        case 0x00:
+        case 0x01:
+        case 0x02:
+        case 0x03:
+        case 0x04:
+        case 0x05: {
+            write_transmit_data(&auth_data[exchange][0], 8);
+            break;
+        }
+        case 0x80:
+        case 0x81:
+        case 0x82:
+        case 0x83:
+        case 0x84:
+        case 0x85:
+        case 0x86:
+        case 0x87: {
+            logger->debug(
+                "{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7], buf[8]
+            );
+
+            std::memcpy(&auth_data[exchange ^ 0x80][0], buf + 1, 8);
+
+            write_transmit_data(nullptr, 0);
+            break;
+        }
+        default:
+            logger->error("Unimplemented exchange {:02X}", exchange);
+            exit(1);
+    }
 }
 
 static void command_write_scratchpad() {
@@ -388,6 +446,9 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_VERSION:
             command_get_baryon_version();
             break;
+        case SysconCommand::SYSCON_COMMAND_GET_STATUS2:
+            command_get_status2();
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_BARYON_TIMESTAMP:
             command_get_baryon_timestamp();
             break;
@@ -399,6 +460,9 @@ static void start_command() {
             break;
         case SysconCommand::SYSCON_COMMAND_SEND_SETPARAM:
             command_send_setparam();
+            break;
+        case SysconCommand::SYSCON_COMMAND_TACHYON_HANDSHAKE:
+            command_tachyon_handshake();
             break;
         case SysconCommand::SYSCON_COMMAND_CTRL_HR_POWER:
             command_ctrl_hr_power();
@@ -466,6 +530,8 @@ void initialize(const Configuration config) {
         ctx.baryon_timestamp,
         ctx.pommel_version
     );
+
+    event_id = scheduler::register_event("SYSCON");
 }
 
 void soft_reset() {
