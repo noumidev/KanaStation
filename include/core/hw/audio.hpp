@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include <common/types.hpp>
 
 namespace kanacore::hw::audio {
@@ -15,5 +17,7 @@ void initialize();
 void soft_reset();
 void hard_reset();
 void shutdown();
+
+std::vector<common::i16> get_samples();
 
 };

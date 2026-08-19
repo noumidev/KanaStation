@@ -98,6 +98,8 @@ static std::shared_ptr<spdlog::logger> logger;
 static std::queue<FifoSample> out_fifo;
 static std::queue<FifoSample> src_fifo;
 
+static std::queue<i16> samples;
+
 static void check_pending_interrupts() {
     if ((HW_AUDIO_INTRSTAT) != 0) {
         intc::assert_sc_interrupt(10);
@@ -152,7 +154,12 @@ static void drain_out_fifo(const int) {
 
     // TODO: push audio samples to out
 
-    out_fifo.pop();
+    const FifoSample fifo_sample = out_fifo.front(); out_fifo.pop();
+
+    if (!fifo_sample.is_stalled) {
+        samples.push(fifo_sample.stereo_sample >>  0);
+        samples.push(fifo_sample.stereo_sample >> 16);
+    }
 
     if (out_fifo.size() == (FIFO_SIZE / 2)) {
         // I assume the FIFO draining to a certain capacity triggers the interrupt.
@@ -311,6 +318,16 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+std::vector<i16> get_samples() {
+    std::vector<i16> sample_data;
+
+    while (!samples.empty()) {
+        sample_data.push_back(samples.front()); samples.pop();
+    }
+
+    return sample_data;
 }
 
 };

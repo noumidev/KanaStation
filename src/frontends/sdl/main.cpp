@@ -8,6 +8,7 @@
 #define SDL_MAIN_USE_CALLBACKS
 
 #include <unordered_map>
+#include <vector>
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -17,6 +18,7 @@
 #include <common/types.hpp>
 #include <core/config.hpp>
 #include <core/kanacore.hpp>
+#include <core/hw/audio.hpp>
 #include <core/hw/dmacplus.hpp>
 
 using namespace common;
@@ -29,6 +31,8 @@ static struct {
     SDL_Window* window;
     SDL_Texture* texture;
 } screen;
+
+static SDL_AudioStream* audio_stream = nullptr;
 
 static const std::unordered_map<SDL_Scancode, kanacore::Button> key_bindings = {
     { SDL_SCANCODE_W, kanacore::Button::BUTTON_UP       },
@@ -88,7 +92,29 @@ SDL_AppResult SDL_AppInit(void**, int, char**) {
         return SDL_APP_FAILURE;
     }
 
-    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        SDL_Log("Failed to initialize SDL Audio: %s", SDL_GetError());
+    
+        return SDL_APP_FAILURE;
+    }
+
+    SDL_AudioSpec spec;
+
+    spec.freq = 44100;
+    spec.format = SDL_AUDIO_S16;
+    spec.channels = 2;
+
+    audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+
+    if (!audio_stream) {
+        SDL_Log("Failed to create audio stream: %s", SDL_GetError());
+
+        return SDL_APP_FAILURE;
+    }
+
+    SDL_ResumeAudioStreamDevice(audio_stream);
 
     // All KanaCore loggers rely on this
 #ifdef NDEBUG
@@ -146,6 +172,14 @@ SDL_AppResult SDL_AppIterate(void*) {
     SDL_RenderClear(screen.renderer);
     SDL_RenderTexture(screen.renderer, screen.texture, nullptr, nullptr);
     SDL_RenderPresent(screen.renderer);
+
+    const std::vector<i16> samples = kanacore::hw::audio::get_samples();
+
+    SDL_PutAudioStreamData(audio_stream, samples.data(), sizeof(i16) * samples.size());
+
+    while (SDL_GetAudioStreamQueued(audio_stream) > 8192) {
+        SDL_Delay(1); 
+    }
 
     return SDL_APP_CONTINUE;
 }
