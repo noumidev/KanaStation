@@ -75,7 +75,7 @@ void Allegrex::reschedule_count() {
         const int cpu_id = get_cpu_id();
 
         scheduler::schedule_event(
-            (cpu_id == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME,
+            event_id,
             assert_count_interrupt_impl,
             cpu_id,
             cp0.compare - get_count(),
@@ -101,7 +101,7 @@ T Allegrex::read(const u32 addr) {
 
     // TODO: properly handle memory segments
     const u32 masked_addr = addr & 0x1FFFFFFF;
-    
+
     return bus.read<T>(masked_addr);
 }
 
@@ -126,6 +126,10 @@ template void Allegrex::write(const u32, const u8);
 template void Allegrex::write(const u32, const u16);
 template void Allegrex::write(const u32, const u32);
 
+void Allegrex::initialize() {
+    event_id = scheduler::register_event((cpu_id == CPU_ID_SC) ? "SC_COUNT" : "ME_COUNT");
+}
+
 void Allegrex::soft_reset() {
     // This has a bit more to it than this, but for now this should suffice
     state = CpuState::Run;
@@ -135,9 +139,7 @@ void Allegrex::soft_reset() {
 
     jump(BOOT_EXCEPTION_ADDR);
 
-    scheduler::cancel_event(
-        (get_cpu_id() == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME
-    );
+    scheduler::cancel_event(event_id);
 }
 
 void Allegrex::hard_reset() {
@@ -151,9 +153,7 @@ void Allegrex::hard_reset() {
 
     jump(BOOT_EXCEPTION_ADDR);
 
-    scheduler::cancel_event(
-        (get_cpu_id() == CpuId::CPU_ID_SC) ? scheduler::EventType::COUNT_SC : scheduler::EventType::COUNT_ME
-    );
+    scheduler::cancel_event(event_id);
 }
 
 void Allegrex::dump_state() {
@@ -315,6 +315,7 @@ u32 Allegrex::get_status_reg(const u32 idx) const {
         case Cp0::StatusRegister::STATUS_REGISTER_TAGHI:
             data = cp0.taghi;
             break;
+        case 15:
         case 24:
             // Later firmwares read this register. Bit 0 = 1 seems to trigger clearing
             // the L2 cache, which doesn't exist on early models?
@@ -364,6 +365,8 @@ void Allegrex::set_status_reg(const u32 idx, const u32 data) {
             break;
         case Cp0::StatusRegister::STATUS_REGISTER_ERROREPC:
             cp0.error_epc = data;
+            break;
+        case 24:
             break;
         default:
             logger->error("Unimplemented write to CP0 status register {} = {:08X}", Cp0::STATUS_REGISTER_NAMES[idx], data);

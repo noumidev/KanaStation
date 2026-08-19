@@ -197,6 +197,8 @@ private:
     void clear_count_interrupt();
     void reschedule_count();
 
+    common::u32 event_id;
+
 public:
     Allegrex(const CpuId cpu_id);
     ~Allegrex();
@@ -237,6 +239,7 @@ public:
         delay_slot_pending = false;
     }
 
+    void initialize();
     void soft_reset();
     void hard_reset();
 
