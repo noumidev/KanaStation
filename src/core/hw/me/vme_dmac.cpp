@@ -71,6 +71,8 @@ static struct {
     } outer_agu;
 } ctx;
 
+static u32 event_id;
+
 static void end_command(const int) {
     HW_VMEDMAC_STATUS &= ~0x800;
 
@@ -85,7 +87,7 @@ static void end_transfer(const int vme_busy) {
     if (vme_busy != 0) {
         HW_VMEDMAC_STATUS |= 0x800;
 
-        scheduler::schedule_event(scheduler::EventType::VME_DMA, end_command, vme_busy, scheduler::from_microseconds(5));
+        scheduler::schedule_event(event_id, end_command, 0, scheduler::from_microseconds(5));
     }
 }
 
@@ -94,12 +96,35 @@ static void start_command() {
     // until we know what all the bits mean, I will treat it as such
     const u32 command = HW_VMEDMAC_CONTROL;
 
+    u32 length;
+
     switch (command) {
         case VmeDmacCommand::VMEDMAC_COMMAND_UPLOAD_BITSTREAM:
             logger->debug("UPLOAD_BITSTREAM");
+
+            length = 0x1A8;
             break;
         case VmeDmacCommand::VMEDMAC_COMMAND_CLEAR_LOCAL_BUFFER:
-            logger->debug("CLEAR_LOCAL_BUFFER (offset: {:04X}, length: {:04X})", HW_VMEDMAC_AGUOUT_OFFSET, HW_VMEDMAC_AGUOUT_LENGTH + 1);
+            length = HW_VMEDMAC_AGUOUT_LENGTH + 1;
+
+            logger->debug("CLEAR_LOCAL_BUFFER (offset: {:04X}, length: {:04X})", HW_VMEDMAC_AGUOUT_OFFSET, length);
+            break;
+        case 0x18:
+            HW_VMEDMAC_STATUS |= 0x800;
+
+            scheduler::schedule_event(event_id, end_command, 0, scheduler::from_microseconds(5));
+            return;
+        case 0x03:
+        case 0x08:
+            return;
+        case 0x05:
+        case 0x40:
+        case 0x50:
+        case 0x58:
+        case 0x5A:
+            length = HW_VMEDMAC_AGUOUT_LENGTH + 1;
+
+            logger->debug("VME command {:02X} (length: {:04X})", command, length);
             break;
         default:
             logger->error("Unimplemented command {:02X}", command);
@@ -111,7 +136,7 @@ static void start_command() {
 
     const bool vme_busy = command == VmeDmacCommand::VMEDMAC_COMMAND_UPLOAD_BITSTREAM;
 
-    scheduler::schedule_event(scheduler::EventType::VME_DMA, end_transfer, vme_busy, scheduler::from_microseconds(5));
+    scheduler::schedule_event(event_id, end_transfer, vme_busy, length / 0x10);
 }
 
 static u32 read(const u32 addr) {
@@ -166,8 +191,8 @@ static void write(const u32 addr, const u32 data) {
             HW_VMEDMAC_AGUOUT_OFFSET = data;
             break;
         default:
-            logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);
-            exit(1);
+            logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
+            break;
     }
 }
 
@@ -175,6 +200,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("VME DMAC");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    event_id = scheduler::register_event("VMEDMAC");
 }
 
 void soft_reset() {
