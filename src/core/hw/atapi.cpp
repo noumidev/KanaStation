@@ -199,20 +199,23 @@ public:
 
     bool mount(const char* path) {
         if (path == nullptr) {
-            std::printf("NO PATH\n");
             return false;
         }
 
         file = std::fopen(path, "rb");
 
         if (file == nullptr) {
-            std::printf("NO FILE\n");
             return false;
         }
 
         std::fseek(file, 0, SEEK_END);
         file_size = std::ftell(file);
         std::fseek(file, 0, SEEK_SET);
+
+        if ((file_size & (SECTOR_SIZE - 1)) != 0) {
+            std::fclose(file);
+            return false;
+        }
 
         return true;
     }
@@ -249,6 +252,8 @@ public:
 };
 
 static std::shared_ptr<spdlog::logger> logger;
+
+static u32 event_id;
 
 static AtapiState state = AtapiState::ATAPI_STATE_IDLE;
 
@@ -289,10 +294,6 @@ static void check_condition(const SenseKey sense_key, const AdditionalSense addi
     ctx.additional_sense = additional_sense;
 }
 
-static inline u16 get_length() {
-    return (HW_ATAPI_LBA_HI << 8) | HW_ATAPI_LBA_MID;
-}
-
 static void assert_scsi_interrupt(const ScsiRetval retval) {
     HW_ATAPI_LBA_MID = retval.length;
     HW_ATAPI_LBA_HI  = retval.length >> 8;
@@ -328,7 +329,10 @@ static void get_in_params() {
 }
 
 static u16 get_out_data() {
-    assert(!out_fifo.empty());
+    if (out_fifo.empty()) {
+        logger->warn("Out FIFO empty");
+        return 0;
+    }
 
     u16 data = out_fifo.front(); out_fifo.pop();
 
@@ -366,13 +370,15 @@ static void clear_fifos() {
 static ScsiRetval scsi_command_test_unit_ready() {
     logger->debug("SCSI TEST_UNIT_READY");
 
+    SenseKey sense_key = SenseKey::SENSE_KEY_NO_SENSE;
+    AdditionalSense additional_sense = AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE;
+
     if (!umd.is_mounted()) {
-        check_condition(SenseKey::SENSE_KEY_NOT_READY, AdditionalSense::ADDITIONAL_SENSE_MEDIUM_NOT_PRESENT);
-    } else {
-        check_condition(SenseKey::SENSE_KEY_NO_SENSE, AdditionalSense::ADDITIONAL_SENSE_NO_ADDITIONAL_SENSE);
+        sense_key = SenseKey::SENSE_KEY_NOT_READY;
+        additional_sense = AdditionalSense::ADDITIONAL_SENSE_MEDIUM_NOT_PRESENT;
     }
 
-    return {};
+    return {0, false, sense_key, additional_sense};
 }
 
 static ScsiRetval scsi_command_request_sense() {
@@ -469,6 +475,7 @@ static ScsiRetval scsi_command_read_long() {
 }
 
 enum LogPage {
+    LOG_PAGE_FORMAT_STATUS               = 0x0800,
     LOG_PAGE_POWER_CONDITION_TRANSITIONS = 0x1A00,
 };
 
@@ -527,6 +534,12 @@ static ScsiRetval scsi_command_mode_sense_long() {
             write_out_fifo(4);
             break;
         }
+        case LogPage::LOG_PAGE_FORMAT_STATUS:
+            logger->debug("FORMAT_STATUS");
+            for (u16 i = 0; i < MODE_SENSE_SIZE; i++) {
+                write_out_fifo(0xFF);
+            }
+            break;
         default:
             logger->error("Unimplemented log page {:04X} for MODE SENSE (10)", log_page_code);
             exit(1);
@@ -610,17 +623,12 @@ static ScsiRetval scsi_command_read_disc_stucture() {
 }
 
 static ScsiRetval scsi_command_f0() {
-    // MAYBE this is the allocation length?
-    const u8 data_length = in_params[1];
-
     logger->warn("SCSI F0");
-
-    assert(data_length == 1);
 
     // According to JPCSP, this can return one of four values
     write_out_fifo(0x47);
 
-    return {data_length};
+    return {1};
 }
 
 static ScsiRetval scsi_command_f1() {
@@ -691,7 +699,7 @@ static void start_scsi_command() {
     HW_ATAPI_STATUS.busy = 1;
 
     scheduler::schedule_event(
-        scheduler::EventType::ATAPI,
+        event_id,
         end_scsi_command,
         command,
         scheduler::from_microseconds(1000),
@@ -729,7 +737,7 @@ static void start_ata_command(const u8 command) {
     HW_ATAPI_STATUS.busy = 1;
 
     scheduler::schedule_event(
-        scheduler::EventType::ATAPI,
+        event_id,
         end_ata_command,
         command,
         scheduler::from_microseconds(1000),
@@ -930,6 +938,8 @@ void initialize(const char* umd_path) {
     if (umd.mount(umd_path)) {
         logger->debug("UMD inserted");
     }
+
+    event_id = scheduler::register_event("ATAPI");
 }
 
 void soft_reset() {
