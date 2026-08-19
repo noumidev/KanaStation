@@ -329,6 +329,8 @@ static void end_dma(const int is_write) {
 }
 
 static void start_dma() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     const bool is_write = HW_NAND_DMACTRL.direction == DmaDirection::DMA_DIRECTION_TO_NAND;
 
     // Determines whether to transfer the data area, the spare area, or both
@@ -363,8 +365,12 @@ static void start_dma() {
         }
     }
 
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("NAND");
+    }
+
     scheduler::schedule_event(
-        scheduler::EventType::NAND_DMA,
+        event_id,
         end_dma,
         is_write,
         scheduler::from_microseconds(60),

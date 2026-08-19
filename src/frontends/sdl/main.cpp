@@ -94,7 +94,7 @@ SDL_AppResult SDL_AppInit(void**, int, char**) {
 #ifdef NDEBUG
     spdlog::set_level(spdlog::level::debug);
 #else
-    spdlog::set_level(spdlog::level::warn);
+    spdlog::set_level(spdlog::level::err);
 #endif
 
     spdlog::set_pattern("[%n] [%^%l%$] %v");

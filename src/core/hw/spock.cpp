@@ -168,15 +168,21 @@ static void end_command(const int result) {
 }
 
 static i32 command_lepton_challenge() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+    
     logger->debug("LEPTON_CHALLENGE");
 
     // umdman waits for this pin to go high after sending the LEPTON_CHALLENGE command
     gpio::set_pin(gpio::PIN_LEPTON_ALIVE);
 
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("UMD_LEPTON");
+    }
+
     // Presumably, this is also where LEPTON will check if a UMD is inserted?
     // I should test this on hardware, but doing it here doesn't seem to hurt
     scheduler::schedule_event(
-        scheduler::EventType::LEPTON,
+        event_id,
         atapi::umd_initialize,
         0,
         scheduler::from_microseconds(5000),
@@ -319,6 +325,8 @@ static i32 command_reset() {
 }
 
 static void start_command() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     assert(!HW_SPOCK_STATUS.busy);
     assert(HW_SPOCK_COMMAND.flag == 1);
 
@@ -368,9 +376,12 @@ static void start_command() {
         return;
     }
 
-    // Timings will vary between commands, so we just pick a short delay for now
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("UMD_SPOCK");
+    }
+
     scheduler::schedule_event(
-        scheduler::EventType::SPOCK,
+        event_id,
         end_command,
         result,
         scheduler::from_microseconds(ctx.command_delay),

@@ -111,10 +111,16 @@ static void hsync(const int) {
 }
 
 static void reschedule_hsync(const bool regs_dirty) {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("LCDC_HSYNC");
+    }
+
     if (regs_dirty) {
         ctx.scanline = 0;
 
-        scheduler::cancel_event(scheduler::EventType::HSYNC);
+        scheduler::cancel_event(event_id);
     }
 
     if (((HW_LCDC_CONTROL & 3) != 3) || (HW_LCDC_XRES == 0)) {
@@ -122,7 +128,7 @@ static void reschedule_hsync(const bool regs_dirty) {
     }
 
     scheduler::schedule_event(
-        scheduler::EventType::HSYNC,
+        event_id,
         hsync,
         0,
         scheduler::to_scheduler_cycles(
@@ -267,6 +273,9 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("YSRES write32 = {:08X}", data);
 
             HW_LCDC_YSRES = data;
+            break;
+        case LCDC_ADDR + 0x070:
+            logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
         default:
             logger->error("Unmapped write32 @ {:08X} = {:08X}", addr, data);

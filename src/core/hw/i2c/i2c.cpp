@@ -79,6 +79,8 @@ static std::shared_ptr<spdlog::logger> logger;
 static std::queue<u8> transmit_fifo;
 static std::queue<u8> receive_fifo;
 
+static u32 event_id;
+
 static void end_transmission_reception(const int) {
     HW_I2C_CONTROL.busy = false;
 
@@ -138,7 +140,7 @@ static void start_transmission() {
     }
     
     scheduler::schedule_event(
-        scheduler::EventType::I2C,
+        event_id,
         end_transmission_reception,
         0,
         scheduler::from_microseconds(50 * HW_I2C_LENGTH)
@@ -153,7 +155,7 @@ static void start_reception() {
     push_in_params(ctx.transmit(HW_I2C_LENGTH));
 
     scheduler::schedule_event(
-        scheduler::EventType::I2C,
+        event_id,
         end_transmission_reception,
         0,
         scheduler::from_microseconds(50 * HW_I2C_LENGTH)
@@ -273,6 +275,8 @@ void initialize() {
 
     clockgen::initialize();
     codec::initialize();
+
+    event_id = scheduler::register_event("I2C");
 }
 
 void soft_reset() {

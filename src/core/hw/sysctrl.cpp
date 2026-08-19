@@ -250,7 +250,9 @@ static void write(const u32 addr, const u32 data) {
             // Tachyon version is read-only
             HW_SYSCTRL_RAMSIZE = (HW_SYSCTRL_RAMSIZE & 0xFF000800) | (data & 0xFFF7FF);
             break;
-        case IoAddress::IO_ADDRESS_POSTME:
+        case IoAddress::IO_ADDRESS_POSTME: {
+            static u32 event_id = scheduler::NO_EVENT_ID;
+
             logger->debug("POSTME write32 = {:08X}", data);
             
             if ((data & 1) != 0) {
@@ -258,8 +260,12 @@ static void write(const u32 addr, const u32 data) {
 
                 const u32 command = bus->read<u32>(0x1FC00600);
 
+                if (event_id == scheduler::NO_EVENT_ID) {
+                    event_id = scheduler::register_event("ME_RPC");
+                }
+
                 scheduler::schedule_event(
-                    scheduler::EventType::RPC,
+                    event_id,
                     assert_rpc_interrupt,
                     0,
                     // For some weird reason, later firmwares send their first RPC interrupt
@@ -270,6 +276,7 @@ static void write(const u32 addr, const u32 data) {
                 );
             }
             break;
+        }
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN write32 = {:08X}", data);
             write_reset_enable(data);

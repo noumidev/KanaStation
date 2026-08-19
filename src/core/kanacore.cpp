@@ -70,8 +70,14 @@ static void vsync(const int) {
 }
 
 static void schedule_vsync() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("CORE_VSYNC");
+    }
+
     scheduler::schedule_event(
-        scheduler::EventType::VSYNC,
+        event_id,
         vsync,
         0,
         scheduler::from_microseconds(16666),
@@ -133,6 +139,9 @@ void initialize(const Configuration config) {
     hw::me::sysctrl::initialize();
     hw::me::vme_dmac::initialize();
     hw::uart::initialize();
+
+    sc.initialize();
+    me.initialize();
 
     IS_INITIALIZED = true;
 }

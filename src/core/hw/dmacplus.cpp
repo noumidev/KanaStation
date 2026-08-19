@@ -218,6 +218,8 @@ static void start_transfer(const int chan_id) {
         "SC2ME", "ME2SC", "SC128",
     };
 
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     auto& chan = channels[chan_id];
     const u32 length = chan.control.transfer_length;
 
@@ -254,8 +256,12 @@ static void start_transfer(const int chan_id) {
         chan.destination_addr += 4 * dst_offset;
     }
 
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("DMACPLUS");
+    }
+
     scheduler::schedule_event(
-        scheduler::EventType::DMACPLUS_DMA,
+        event_id,
         end_transfer,
         chan_id,
         32 * length

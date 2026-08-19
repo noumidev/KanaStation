@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <spdlog/spdlog.h>
@@ -30,31 +31,10 @@ static std::shared_ptr<spdlog::logger> logger;
 constexpr i64 MAX_CYCLES  = 512;
 constexpr i64 SYNC_CYCLES = 128;
 
-static constexpr const char* EVENT_TYPE_NAMES[] = {
-    "KIRK 1st phase",
-    "SPOCK",
-    "MG",
-    "LEPTON",
-    "ATAPI",
-    "SPI TX",
-    "SYSCON TX",
-    "I2C",
-    "Memory Stick",
-    "NAND DMA",
-    "VME DMA",
-    "DMAC DMA",
-    "DMACplus DMA",
-    "Audio",
-    "SysTime",
-    "Count (SC)",
-    "Count (ME)",
-    "HSYNC",
-    "VSYNC",
-    "RPC"
-};
+static std::vector<std::string> event_names;
 
 struct Event {
-    EventType type;
+    u32 id;
     Callback callback;
 
     int arg;
@@ -85,50 +65,55 @@ void shutdown() {
 
 }
 
-void schedule_event(const EventType type, Callback callback, const int arg, const i64 cycles, const bool auto_cancel) {
+u32 register_event(const char* name) {
+    static u32 id_pool = 0;
+
+    event_names.push_back(name);
+    
+    return id_pool++;
+}
+
+void schedule_event(const u32 id, Callback callback, const int arg, const i64 cycles, const bool auto_cancel) {
+    assert(id < event_names.size());
+
     hw::allegrex::Allegrex* sc = kanacore::get_sc_ptr();
+    hw::allegrex::Allegrex* me = kanacore::get_me_ptr();
 
-    logger->debug("Scheduling event {} with arg: {} in {} cycles", EVENT_TYPE_NAMES[type], arg, cycles);
-
-    assert(type < EventType::NUM_EVENT_TYPES);
+    logger->debug("Scheduling event {} with arg {} in {} cycles", event_names[id], arg, cycles);
 
     if (auto_cancel) {
         // Auto-canceling events would break a bunch, so don't force it
-        cancel_event(type);
+        cancel_event(id);
     }
 
-    const i64 event_timestamp = *sc->get_cycles() + cycles;
+    const i64 event_timestamp = std::max(*sc->get_cycles(), *me->get_cycles()) + cycles;
 
-    event_queue.emplace_back(
-        Event{
-            type,
-            callback,
-            arg,
-            event_timestamp
-        }
-    );
+    const Event event{ id, callback, arg, event_timestamp };
 
-    std::sort(event_queue.begin(), event_queue.end(),
+    auto it = std::upper_bound(event_queue.begin(), event_queue.end(), event,
         [](const Event& a, const Event& b) {
-            return a.timestamp > b.timestamp; 
+            return a.timestamp > b.timestamp;
         }
     );
+    
+    event_queue.insert(it, event);
 
     // If the new event expires before the current event, we make it the new closest event
     if (event_timestamp < global_timestamp) {
         global_timestamp = event_timestamp;
 
         *sc->get_target_timestamp() = event_timestamp;
+        *me->get_target_timestamp() = event_timestamp;
     }
 }
 
-void cancel_event(const EventType type) {
-    assert(type < EventType::NUM_EVENT_TYPES);
+void cancel_event(const u32 id) {
+    assert(id < event_names.size());
 
     event_queue.erase(
         std::remove_if(event_queue.begin(), event_queue.end(),
-            [type](const Event& e) {
-                return e.type == type;
+            [id](const Event& e) {
+                return e.id == id;
             }
         ),
         event_queue.end()

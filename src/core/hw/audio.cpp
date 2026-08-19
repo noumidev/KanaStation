@@ -86,6 +86,8 @@ static struct {
     int out_stall_count;
 } ctx;
 
+static u32 event_id;
+
 struct FifoSample {
     u32 stereo_sample;
     bool is_stalled;
@@ -138,7 +140,7 @@ static void check_audio_dma_request() {
 static void disable_out_channel() {
     ctx.out_stall_count = 24;
 
-    scheduler::cancel_event(scheduler::EventType::AUDIO);
+    scheduler::cancel_event(event_id);
 
     check_audio_dma_request();
 
@@ -162,7 +164,7 @@ static void drain_out_fifo(const int) {
 
     if (!out_fifo.empty()) {
         scheduler::schedule_event(
-            scheduler::EventType::AUDIO,
+            event_id,
             drain_out_fifo,
             0,
             scheduler::to_scheduler_cycles(44100, 1),
@@ -185,7 +187,7 @@ static void write_out_fifo(const u32 data) {
     if (out_fifo.size() == 1) {
         // Kick off draining the FIFO
         scheduler::schedule_event(
-            scheduler::EventType::AUDIO,
+            event_id,
             drain_out_fifo,
             0,
             scheduler::to_scheduler_cycles(44100, 1),
@@ -287,6 +289,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("Audio");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    event_id = scheduler::register_event("SRC_AUDIO");
 }
 
 void soft_reset() {

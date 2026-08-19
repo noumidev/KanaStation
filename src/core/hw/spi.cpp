@@ -106,6 +106,8 @@ static struct {
     } dma_control;
 } ctx;
 
+static u32 event_id;
+
 static std::shared_ptr<spdlog::logger> logger;
 
 static std::queue<u16> transmit_fifo;
@@ -146,7 +148,7 @@ static void transmit_data(const int) {
         logger->debug("Continuing transmission");
 
         scheduler::schedule_event(
-            scheduler::EventType::SPI_TX,
+            event_id,
             transmit_data,
             0,
             scheduler::SPI_CLOCKRATE
@@ -173,7 +175,7 @@ static void start_transmission() {
     HW_SPI_STATUS.busy = true;
 
     scheduler::schedule_event(
-        scheduler::EventType::SPI_TX,
+        event_id,
         transmit_data,
         0,
         scheduler::from_microseconds(2)
@@ -283,6 +285,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("SPI");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    event_id = scheduler::register_event("SPI0");
 }
 
 void soft_reset() {

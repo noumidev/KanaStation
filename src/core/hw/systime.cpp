@@ -53,6 +53,8 @@ static struct {
     i64 start_timestamp;
 } ctx;
 
+static u32 event_id;
+
 static void alarm(const int) {
     intc::assert_sc_interrupt(SYSTIME_INTERRUPT);
 }
@@ -64,7 +66,7 @@ static u32 get_counter() {
 static void reschedule_alarm() {
     if (HW_SYSCTRL_ALARM > get_counter()) {
         scheduler::schedule_event(
-            scheduler::EventType::SYSTIME,
+            event_id,
             alarm,
             0,
             scheduler::from_microseconds(HW_SYSCTRL_ALARM - get_counter()),
@@ -82,7 +84,7 @@ static void enable_systime(const u32 data) {
         reschedule_alarm();
     } else if (HW_SYSCTRL_ENABLE && !new_enable) {
         // The kernel never turns the timer off, but it *is* possible
-        scheduler::cancel_event(scheduler::EventType::SYSTIME);
+        scheduler::cancel_event(event_id);
     }
 }
 
@@ -149,6 +151,8 @@ void initialize() {
     logger = spdlog::stdout_color_st("SysTime");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    event_id = scheduler::register_event("SYSTIME");
 }
 
 void soft_reset() {

@@ -21,29 +21,7 @@ constexpr common::i64 ONE_MICROSECOND = SCHEDULER_CLOCKRATE / 1000 / 1000;
 constexpr common::i64 SPI_CLOCKRATE   = 2 * ONE_MICROSECOND;
 constexpr common::i64 PIXEL_CLOCKRATE = 9000000;
 
-enum EventType {
-    KIRK_1ST_PHASE,
-    SPOCK,
-    MG,
-    LEPTON,
-    ATAPI,
-    SPI_TX,
-    SYSCON_TX,
-    I2C,
-    MEMORY_STICK,
-    NAND_DMA,
-    VME_DMA,
-    DMAC_DMA,
-    DMACPLUS_DMA,
-    AUDIO,
-    SYSTIME,
-    COUNT_SC,
-    COUNT_ME,
-    HSYNC,
-    VSYNC,
-    RPC,
-    NUM_EVENT_TYPES,
-};
+constexpr common::u32 NO_EVENT_ID = -1;
 
 void initialize();
 void soft_reset();
@@ -58,15 +36,17 @@ inline common::i64 from_microseconds(const common::i64 ms) {
     return ms * ONE_MICROSECOND;
 }
 
+common::u32 register_event(const char* name);
+
 void schedule_event(
-    const EventType type,
+    const common::u32 id,
     Callback callback,
     const int arg,
     const common::i64 cycles,
     const bool auto_cancel = false
 );
 
-void cancel_event(const EventType type);
+void cancel_event(const common::u32 id);
 
 bool run();
 

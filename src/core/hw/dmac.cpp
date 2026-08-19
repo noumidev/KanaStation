@@ -299,6 +299,8 @@ template<int dmac_num>
 static void start_transfer(const int chan_idx) {
     static_assert(dmac_num < NUM_DMACS);
 
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
     
     Dmac* dmac = &dmacs[dmac_num];
@@ -342,8 +344,12 @@ static void start_transfer(const int chan_idx) {
     }
 
     if (length == 0) {
+        if (event_id == scheduler::NO_EVENT_ID) {
+            event_id = scheduler::register_event("DMAC");
+        }
+
         scheduler::schedule_event(
-            scheduler::EventType::DMAC_DMA,
+            event_id,
             end_transfer<dmac_num>,
             chan_idx,
             16 * HW_DMAC_CHAN_CONTROL.transfer_length

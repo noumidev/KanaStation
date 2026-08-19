@@ -165,6 +165,8 @@ static void des_encrypt(u8* data) {
 }
 
 static void start_command() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     std::vector<u8> in_data = get_in_data();
 
     // Unsure if this limitation actually exists, but it's better to check...
@@ -181,8 +183,12 @@ static void start_command() {
 
     push_out_data(in_data);
 
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("MAGICGATE");
+    }
+
     scheduler::schedule_event(
-        scheduler::EventType::MG,
+        event_id,
         end_command,
         0,
         scheduler::from_microseconds(20)

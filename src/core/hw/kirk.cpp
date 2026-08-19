@@ -827,6 +827,8 @@ static void end_first_phase(const int result) {
 }
 
 static void start_first_phase() {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     i32 result;
 
     switch (HW_KIRK_COMMAND) {
@@ -862,10 +864,14 @@ static void start_first_phase() {
             exit(1);
     }
 
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("KIRK");
+    }
+
     // Timings will vary between commands and payload lengths, so we just pick
     // a short delay for now
     scheduler::schedule_event(
-        scheduler::EventType::KIRK_1ST_PHASE,
+        event_id,
         end_first_phase,
         result,
         scheduler::from_microseconds(5),

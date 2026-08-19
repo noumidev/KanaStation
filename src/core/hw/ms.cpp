@@ -344,6 +344,8 @@ static void end_pro_command(const int buf_request) {
 }
 
 static void start_pro_command(const u8 command) {
+    static u32 event_id = scheduler::NO_EVENT_ID;
+
     bool buf_request = false;
 
     ctx.data_count  = 0;
@@ -394,7 +396,11 @@ static void start_pro_command(const u8 command) {
     HW_MSIF0_STATUS.raw  &= ~(1 << 13);
     HW_MSIF0_STATUS.ready = 0;
 
-    scheduler::schedule_event(scheduler::EventType::MEMORY_STICK, end_pro_command, buf_request, scheduler::from_microseconds(50));
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("MEMORYSTICK");
+    }
+
+    scheduler::schedule_event(event_id, end_pro_command, buf_request, scheduler::from_microseconds(50));
 }
 
 static u8 read_register(const u8 idx) {
