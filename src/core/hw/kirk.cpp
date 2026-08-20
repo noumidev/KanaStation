@@ -437,15 +437,59 @@ ECDSA<ECP, SHA1>::Verifier get_kirk1_verifier() {
     return ECDSA<ECP, SHA1>::Verifier(public_key);
 }
 
+ECDSA<ECP, SHA1>::Verifier get_kirk12_verifier(const u8* x, const u8* y) {
+    // Curve parameters
+    ECP curve(
+        Integer("0xFFFFFFFFFFFFFFFF00000001FFFFFFFFFFFFFFFF"),
+        Integer(-3),
+        Integer("0xA68BEDC33418029C1D3CE33B9A321FCCBB9E0F0B")
+    );
+
+    ECP::Point G(
+        Integer("0x128EC4256487FD8FDF64E2437BC0A1F6D5AFDE2C"),
+        Integer("0x5958557EB1DB001260425524DBC379D5AC5F4ADF")
+    );
+
+    DL_GroupParameters_EC<ECP> params(
+        curve,
+        G,
+        Integer("0xFFFFFFFFFFFFFFFEFFFFB5AE3C523E63944F2127")
+    );
+
+    // Public key
+    ECDSA<ECP, SHA1>::PublicKey public_key;
+
+    public_key.Initialize(
+        params,
+        ECP::Point(
+            Integer(x, DIGEST_SIZE),
+            Integer(y, DIGEST_SIZE)
+        )
+    );
+
+    return ECDSA<ECP, SHA1>::Verifier(public_key);
+}
+
 static ECDSA<ECP, SHA1>::Verifier kirk1_verifier = get_kirk1_verifier();
 
-bool ecdsa_verify(const ECDSA<ECP, SHA1>::Verifier& verifier, const u8* r, const u8* s, const u8* data, size_t data_size) {
+bool ecdsa_verify(const ECDSA<ECP, SHA1>::Verifier& verifier, const u8* r, const u8* s, const u8* data, const size_t data_size) {
     std::array<u8, 2 * DIGEST_SIZE> signature;
 
     std::memcpy(signature.data(), r, DIGEST_SIZE);
     std::memcpy(signature.data() + DIGEST_SIZE, s, DIGEST_SIZE);
 
     return verifier.VerifyMessage(data, data_size, signature.data(), signature.size());
+}
+
+// This doesn't calculate its own hash and instead verifies an already existing hash of the signed message
+bool ecdsa_verify_hash(const ECDSA<ECP, SHA1>::Verifier& verifier, const u8* r, const u8* s, const u8* hash) {
+    const Integer e (hash, DIGEST_SIZE);
+    const Integer r_(r, DIGEST_SIZE);
+    const Integer s_(s, DIGEST_SIZE);
+
+    DL_Algorithm_ECDSA<ECP> ecdsa_math;
+
+    return ecdsa_math.Verify(verifier.GetKey().GetGroupParameters(), verifier.GetKey(), e, r_, s_);
 }
 
 static void sha_hash(const u8* in, u8* out, const u32 size) {
@@ -718,7 +762,6 @@ static i32 command_decrypt_perconsole() {
 static i32 command_hash() {
     logger->debug("HASH");
 
-
     u32 data_size;
 
     dma_read(HW_KIRK_SRCADDR, (u8*)&data_size, sizeof(data_size));
@@ -726,6 +769,9 @@ static i32 command_hash() {
     if (data_size == 0) {
         return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
     }
+
+    // When KIRK calculates hashes, the size is always aligned up to a word boundary!!
+    data_size = (data_size + 3) & ~3;
 
     std::vector<u8> buf(data_size);
     std::array<u8, DIGEST_SIZE> digest;
@@ -791,8 +837,31 @@ static i32 command_seed() {
 
 static i32 command_sigvry() {
     logger->debug("SIGVRY");
-    // TODO
-    return KirkResult::KIRK_RESULT_SUCCESS;
+
+    // Get public key
+    u8 x[DIGEST_SIZE];
+    u8 y[DIGEST_SIZE];
+
+    dma_read(HW_KIRK_SRCADDR + 0x00, x, sizeof(x));
+    dma_read(HW_KIRK_SRCADDR + 0x14, y, sizeof(y));
+
+    u8 hash[DIGEST_SIZE];
+
+    dma_read(HW_KIRK_SRCADDR + 0x28, hash, sizeof(hash));
+
+    u8 r[DIGEST_SIZE];
+    u8 s[DIGEST_SIZE];
+
+    dma_read(HW_KIRK_SRCADDR + 0x3C, r, sizeof(r));
+    dma_read(HW_KIRK_SRCADDR + 0x50, s, sizeof(s));
+
+    auto verifier = get_kirk12_verifier(x, y);
+
+    if (ecdsa_verify_hash(verifier, r, s, hash)) {
+        return KirkResult::KIRK_RESULT_SUCCESS;
+    } else {
+        return KirkResult::KIRK_RESULT_INVALID_ECDSA_DATA;
+    }
 }
 
 static i32 command_certvry() {
@@ -929,13 +998,14 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_SRCADDR:
             logger->debug("SRCADDR write32 = {:08X}", data);
 
-            HW_KIRK_SRCADDR = data;
+            HW_KIRK_SRCADDR = data & ~3;
             break;
         case IoAddress::IO_ADDRESS_DSTADDR:
             logger->debug("DSTADDR write32 = {:08X}", data);
 
-            HW_KIRK_DSTADDR = data;
+            HW_KIRK_DSTADDR = data & ~3;
             break;
+        case KIRK_ADDR + 0x008:
         case KIRK_ADDR + 0x020:
         case KIRK_ADDR + 0x024:
             logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
