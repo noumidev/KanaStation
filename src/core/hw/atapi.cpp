@@ -781,7 +781,9 @@ static u8 read8(const u32 addr) {
             return HW_ATAPI_DRIVE;
         case IoAddress::IO_ADDRESS_STATUS:
             logger->debug("STATUS read8");
-            // This should clear interrupts
+
+            intc::clear_sc_interrupt(ATA_INTERRUPT);
+
             return HW_ATAPI_STATUS.raw;
         case IoAddress::IO_ADDRESS_ALTSTAT:
             logger->debug("ALTSTAT read8");
