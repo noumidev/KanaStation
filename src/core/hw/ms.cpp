@@ -988,7 +988,7 @@ static void get_attributes() {
     byteswap_to_buf<u16>(&attributes[0x1A4], block_count);
     byteswap_to_buf<u16>(&attributes[0x1A6], user_block_count);
     byteswap_to_buf<u16>(&attributes[0x1A8], SECTOR_SIZE);
-    byteswap_to_buf<u16>(&attributes[0x1DC], SECTOR_SIZE);
+    byteswap_to_buf<u16>(&attributes[0x1CC], SECTOR_SIZE);
     byteswap_to_buf<u8> (&attributes[0x1E3], 1);
     byteswap_to_buf<u8> (&attributes[0x1E6], 1);
 
