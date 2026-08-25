@@ -204,6 +204,7 @@ enum IoAddress {
 
 enum KirkCommand {
     KIRK_COMMAND_DECRYPT_PRIVATE    = 0x01,
+    KIRK_COMMAND_ENCRYPT_STATIC     = 0x04,
     KIRK_COMMAND_ENCRYPT_PERCONSOLE = 0x05,
     KIRK_COMMAND_DECRYPT_STATIC     = 0x07,
     KIRK_COMMAND_DECRYPT_PERCONSOLE = 0x08,
@@ -225,6 +226,7 @@ enum KirkResult {
     KIRK_RESULT_INVALID_HEADER_SIG  = 0x03,
     KIRK_RESULT_INVALID_DATA_SIG    = 0x04,
     KIRK_RESULT_INVALID_ECDSA_DATA  = 0x05,
+    KIRK_RESULT_INVALID_ENC_KEYSEED = 0x0E,
     KIRK_RESULT_INVALID_DEC_KEYSEED = 0x0F,
     KIRK_RESULT_INVALID_DATA_SIZE   = 0x10,
 };
@@ -630,30 +632,83 @@ static i32 command_decrypt_private() {
     return KirkResult::KIRK_RESULT_SUCCESS;
 }
 
+static i32 command_encrypt_static() {
+    logger->debug("ENCRYPT_STATIC");
+
+    // TODO: use named constants
+    u32 header[5];
+
+    dma_read(HW_KIRK_SRCADDR, (u8*)header, 0x14);
+
+    u32& mode    = header[0];
+    u32& submode = header[3];
+
+    if ((mode != 4) || ((submode >> 8) != 0)) {
+        logger->warn("Invalid mode {:08X} {:06X}", mode, submode >> 8);
+        return KirkResult::KIRK_RESULT_INVALID_MODE;
+    }
+
+    u32& body_size = header[4];
+
+    if (body_size == 0) {
+        logger->warn("Body size is 0");
+        return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
+    }
+
+    const u8 keyseed = submode;
+
+    if (keyseed >= (AES_KEYSTORE_SIZE / 2)) {
+        logger->warn("Invalid keyseed {:02X}", keyseed);
+        return KirkResult::KIRK_RESULT_INVALID_ENC_KEYSEED;
+    }
+
+    // Write the header to the destination buffer. "ENCRYPT" commands change the
+    // mode from 4 to 5
+    mode = 5;
+
+    dma_write(HW_KIRK_DSTADDR, (u8*)header, 0x14);
+
+    body_size = align_up(body_size);
+
+    std::vector<u8> buf(body_size);
+
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
+    aes_encrypt(AES_KEYSTORE[keyseed], buf.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR + 0x14, buf.data(), body_size);
+
+    HW_KIRK_STATUS.needs_second_phase = false;
+
+    return KirkResult::KIRK_RESULT_SUCCESS;
+}
+
 static i32 command_encrypt_perconsole() {
     logger->debug("ENCRYPT_PERCONSOLE");
 
     // TODO: use named constants
+    u32 header[5];
 
-    u32 mode;
-    u32 submode;
+    dma_read(HW_KIRK_SRCADDR, (u8*)header, 0x14);
 
-    dma_read(HW_KIRK_SRCADDR + 0x00, (u8*)&mode, sizeof(mode));
-    dma_read(HW_KIRK_SRCADDR + 0x0C, (u8*)&submode, sizeof(submode));
+    u32& mode    = header[0];
+    u32& submode = header[3];
 
     if ((mode != 4) || ((submode >> 8) != 1)) {
         logger->warn("Invalid mode {:08X} {:06X}", mode, submode >> 8);
         return KirkResult::KIRK_RESULT_INVALID_MODE;
     }
 
-    u32 body_size;
-
-    dma_read(HW_KIRK_SRCADDR + 0x10, (u8*)&body_size, sizeof(body_size));
+    u32& body_size = header[4];
 
     if (body_size == 0) {
         logger->warn("Body size is 0");
         return KirkResult::KIRK_RESULT_INVALID_DATA_SIZE;
     }
+
+    // Write the header to the destination buffer. "ENCRYPT" commands change the
+    // mode from 4 to 5
+    mode = 5;
+
+    dma_write(HW_KIRK_DSTADDR, (u8*)header, 0x14);
 
     u8 key[AES_KEY_SIZE];
 
@@ -665,7 +720,7 @@ static i32 command_encrypt_perconsole() {
 
     dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
     aes_encrypt(key, buf.data(), body_size);
-    dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
+    dma_write(HW_KIRK_DSTADDR + 0x14, buf.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
 
@@ -903,6 +958,9 @@ static void start_first_phase() {
     switch (HW_KIRK_COMMAND) {
         case KirkCommand::KIRK_COMMAND_DECRYPT_PRIVATE:
             result = command_decrypt_private();
+            break;
+        case KirkCommand::KIRK_COMMAND_ENCRYPT_STATIC:
+            result = command_encrypt_static();
             break;
         case KirkCommand::KIRK_COMMAND_ENCRYPT_PERCONSOLE:
             result = command_encrypt_perconsole();
