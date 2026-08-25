@@ -80,6 +80,7 @@ struct Cp0 {
     enum ExceptionCode {
         EXCEPTION_CODE_INTERRUPT    = 0x00,
         EXCEPTION_CODE_SYSCALL      = 0x08,
+        EXCEPTION_CODE_BREAKPOINT   = 0x09,
         EXCEPTION_CODE_COP_UNUSABLE = 0x0B,
     };
 
@@ -165,6 +166,30 @@ struct Fpu {
     bool cond;
 };
 
+// CP2
+struct Vfpu {
+    static constexpr common::u64 NUM_REGS = 128;
+
+    static constexpr common::u32 REVISION = 0;
+
+    union {
+        common::u32 raw;
+        common::f32 flt;
+    } matrixfile[NUM_REGS];
+
+    struct {
+        common::u32 source, target, destination;
+    } prefix_stack;
+
+    common::u32 cond;
+    common::u32 internal;
+
+    union {
+        common::u32 raw;
+        common::f32 flt;
+    } prng_ctx[8];
+};
+
 struct Allegrex {
 private:
     std::shared_ptr<spdlog::logger> logger;
@@ -174,6 +199,7 @@ private:
     RegisterFile regfile;
     Cp0 cp0;
     Fpu fpu;
+    Vfpu vfpu;
 
     common::u32 instr_addr;
     common::i64 cycles;
@@ -312,6 +338,14 @@ public:
 
     void set_fpu_cond(const bool cond);
     bool get_fpu_cond() const;
+
+    // VFPU handlers
+    common::u32 get_vfpu_control_reg(const common::u32 idx);
+    void set_vfpu_control_reg(const common::u32 idx, const common::u32 data);
+
+    void set_quad_vector(common::u32 idx, const common::f32 vec[4]);
+    void set_quad_vector_raw(common::u32 idx, const common::u32 vec[4]);
+    void set_quad_matrix(common::u32 idx, const common::f32 mtx[4][4]);
 
     template<typename T>
     T read(const common::u32 addr);

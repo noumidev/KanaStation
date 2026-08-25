@@ -561,6 +561,151 @@ bool Allegrex::get_fpu_cond() const {
     return fpu.cond;
 }
 
+u32 Allegrex::get_vfpu_control_reg(const u32 idx) {
+    if (idx < Vfpu::NUM_REGS) {
+        return vfpu.matrixfile[idx].raw;
+    } else {
+        if ((idx >= 136) && (idx <= 143)) {
+            const u32 prng_idx = idx - 136;
+
+            logger->debug("RCX{} read", prng_idx);
+            return vfpu.prng_ctx[prng_idx].raw;
+        }
+
+        switch (idx) {
+            case 128:
+                logger->debug("PFXS read");
+                return vfpu.prefix_stack.source;
+            case 129:
+                logger->debug("PFXT read");
+                return vfpu.prefix_stack.target;
+                break;
+            case 130:
+                logger->debug("PFXD read");
+                return vfpu.prefix_stack.destination;
+            case 131:
+                logger->debug("CC read");
+                return vfpu.cond;
+            case 132:
+                logger->debug("INF4 read");
+                return vfpu.internal;
+            case 255:
+                // Occasionally, things will read this "register", unsure why...
+                return 0;
+            default:
+                logger->error("Unimplemented read from VFPU control register {}", idx);
+                exit(1);
+        }
+    }
+}
+
+void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
+    if (idx < Vfpu::NUM_REGS) {
+        vfpu.matrixfile[idx].raw = data;
+    } else {
+        if ((idx >= 136) && (idx <= 143)) {
+            const u32 prng_idx = idx - 136;
+
+            logger->debug("RCX{} write = {:08X}", prng_idx, data);
+
+            vfpu.prng_ctx[prng_idx].raw = data;
+            return;
+        }
+
+        switch (idx) {
+            case 128:
+                logger->debug("PFXS write = {:08X}", data);
+
+                vfpu.prefix_stack.source = data;
+                break;
+            case 129:
+                logger->debug("PFXT write = {:08X}", data);
+
+                vfpu.prefix_stack.target = data;
+                break;
+            case 130:
+                logger->debug("PFXD write = {:08X}", data);
+
+                vfpu.prefix_stack.destination = data;
+                break;
+            case 131:
+                logger->debug("CC write = {:08X}", data);
+
+                vfpu.cond = data;
+                break;
+            case 132:
+                logger->debug("INF4 write = {:08X}", data);
+
+                vfpu.internal = data;
+                break;
+            default:
+                logger->error("Unimplemented write to VFPU control register {} = {:08X}", idx, data);
+                exit(1);
+        }
+    }
+}
+
+void Allegrex::set_quad_vector(u32 idx, const f32 vec[4]) {
+    // It's supposedly possible to access higher indices, but I don't
+    // really want to implement this now
+    assert(idx < (Vfpu::NUM_REGS / 2));
+
+    const bool row_major = (idx & 63) >= 32;
+
+    idx &= 31;
+
+    for (int i = 0; i < 4; i++) {
+        if (row_major) {
+            vfpu.matrixfile[4 * idx + i].flt = vec[i];
+        } else {
+            vfpu.matrixfile[0x20 * i + idx].flt = vec[i];
+        }
+    }
+}
+
+void Allegrex::set_quad_vector_raw(u32 idx, const u32 vec[4]) {
+    // It's supposedly possible to access higher indices, but I don't
+    // really want to implement this now
+    assert(idx < (Vfpu::NUM_REGS / 2));
+
+    const bool row_major = (idx & 63) >= 32;
+
+    idx &= 31;
+
+    for (int i = 0; i < 4; i++) {
+        if (row_major) {
+            vfpu.matrixfile[4 * idx + i].raw = vec[i];
+        } else {
+            vfpu.matrixfile[0x20 * i + idx].raw = vec[i];
+        }
+    }
+}
+
+void Allegrex::set_quad_matrix(u32 idx, const f32 mtx[4][4]) {
+    assert(idx < Vfpu::NUM_REGS);
+
+    if (((idx & 3) != 0) || (idx >= 64)) {
+        logger->error("Invalid quad matrix index: {}", idx);
+        exit(1);
+    }
+
+    const bool row_major = idx >= 32;
+
+    idx &= 31;
+
+    for (int column = 0; column < 4; column++) {
+        for (int row = 0; row < 4; row++) {
+            int reg_idx = 0x20 * column + row + idx;
+            
+            if (row_major) {
+                vfpu.matrixfile[reg_idx].flt = mtx[column][row];
+            } else {
+                vfpu.matrixfile[reg_idx].flt = mtx[row][column];
+            }
+        }
+    }
+}
+
 u32 Allegrex::fetch_instr() {
     // Update current instruction address
     instr_addr = regfile.pc;

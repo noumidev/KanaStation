@@ -19,12 +19,15 @@
 #define RS     ((instr >> 21) & 0x1F)
 #define RT     ((instr >> 16) & 0x1F)
 #define FT     ((instr >> 16) & 0x1F)
+#define VT     ((instr >> 16) & 0x7F)
 #define RD     ((instr >> 11) & 0x1F)
 #define FS     ((instr >> 11) & 0x1F)
 #define SIZE   ((instr >> 11) & 0x1F)
+#define VS     ((instr >>  8) & 0x7F)
 #define FD     ((instr >>  6) & 0x1F)
 #define SA     ((instr >>  6) & 0x1F)
 #define POS    ((instr >>  6) & 0x1F)
+#define VD     ((instr >>  0) & 0x7F)
 #define UIMM   ((instr >>  0) & 0xFFFF)
 #define TARGET ((instr >>  0) & 0x3FFFFFF)
 #define SCCODE ((instr >>  6) & 0xFFFFF)
@@ -64,6 +67,10 @@ enum Opcode {
     OPCODE_BNEL     = 0x15,
     OPCODE_BLEZL    = 0x16,
     OPCODE_BGTZL    = 0x17,
+    OPCODE_VFPU0    = 0x18,
+    OPCODE_VFPU1    = 0x19,
+    OPCODE_MFVME    = 0x1A,
+    OPCODE_VFPU3    = 0x1B,
     OPCODE_SPECIAL2 = 0x1C,
     OPCODE_SPECIAL3 = 0x1F,
     OPCODE_LB       = 0x20,
@@ -77,14 +84,20 @@ enum Opcode {
     OPCODE_SH       = 0x29,
     OPCODE_SWL      = 0x2A,
     OPCODE_SW       = 0x2B,
+    OPCODE_MTVME    = 0x2C,
     OPCODE_SWR      = 0x2E,
     OPCODE_CACHE    = 0x2F,
     OPCODE_LL       = 0x30,
     OPCODE_LWC1     = 0x31,
+    OPCODE_LWC2     = 0x32,
+    OPCODE_VFPU4    = 0x34,
     OPCODE_LQC2     = 0x36,
+    OPCODE_VFPU5    = 0x37,
     OPCODE_SC       = 0x38,
     OPCODE_SWC1     = 0x39,
+    OPCODE_SWC2     = 0x3A,
     OPCODE_VFPU6    = 0x3C,
+    OPCODE_SQC2     = 0x3E,
     OPCODE_VFPU7    = 0x3F,
 };
 
@@ -100,6 +113,7 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_MOVZ    = 0x0A,
     SPECIAL_OPCODE_MOVN    = 0x0B,
     SPECIAL_OPCODE_SYSCALL = 0x0C,
+    SPECIAL_OPCODE_BREAK   = 0x0D,
     SPECIAL_OPCODE_SYNC    = 0x0F,
     SPECIAL_OPCODE_MFHI    = 0x10,
     SPECIAL_OPCODE_MTHI    = 0x11,
@@ -149,8 +163,10 @@ enum RegimmOpcode {
 enum CopOpcode {
     COP_OPCODE_MFC       = 0x00,
     COP_OPCODE_CFC       = 0x02,
+    COP_OPCODE_MFVC      = 0x03,
     COP_OPCODE_MTC       = 0x04,
     COP_OPCODE_CTC       = 0x06,
+    COP_OPCODE_MTVC      = 0x07,
     COP_OPCODE_BC        = 0x08,
     COP_OPCODE_SECONDARY = 0x10, // CP0
     COP_OPCODE_SINGLE    = 0x10, // FPU
@@ -174,6 +190,7 @@ enum FpuOpcode {
     FPU_OPCODE_MUL    = 0x02,
     FPU_OPCODE_DIV    = 0x03,
     FPU_OPCODE_SQRT   = 0x04,
+    FPU_OPCODE_ABS    = 0x05,
     FPU_OPCODE_MOV    = 0x06,
     FPU_OPCODE_NEG    = 0x07,
     FPU_OPCODE_TRUNCW = 0x0D,
@@ -192,6 +209,7 @@ enum BitShuffleOpcode {
 enum CopNum {
     COP_NUM_CP0,
     COP_NUM_FPU,
+    COP_NUM_VFPU,
 };
 
 static std::array<Instruction, PRIMARY_TABLE_SIZE> primary_table;
@@ -374,9 +392,21 @@ static i64 i_bnel(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_break(Allegrex* cpu, const u32) {
+    // cpu->raise_lv1_exception(Cp0::EXCEPTION_CODE_BREAKPOINT);
+    // return 1;
+
+    cpu->get_logger()->error("BREAK");
+    cpu->dump_state();
+    cpu->get_logger()->info(" IA: {:08X}", cpu->get_instr_addr());
+    exit(1);
+}
+
 template<int cop_num>
 static i64 i_cfc(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(cop_num));
+    if (!cpu->is_coprocessor_usable(cop_num)) {
+        return 1;
+    }
 
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
@@ -400,7 +430,9 @@ static i64 i_clz(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_ctc(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(cop_num));
+    if (!cpu->is_coprocessor_usable(cop_num)) {
+        return 1;
+    }
 
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
@@ -459,6 +491,11 @@ static i64 i_ext(Allegrex* cpu, const u32 instr) {
     assert((POS + SIZE + 1) <= 32);
 
     cpu->set_reg(RT, (cpu->get_reg(RS) >> POS) & (0xFFFFFFFFU >> (31 - SIZE)));
+    return 1;
+}
+
+static i64 i_fabs(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr(FD, std::abs(cpu->get_fgr(FS)));
     return 1;
 }
 
@@ -585,8 +622,21 @@ static i64 i_ll(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
-static i64 i_lqc2(Allegrex* cpu, const u32) {
-    cpu->get_logger()->warn("Unimplemented LQC2");
+// Also called LV.Q
+static i64 i_lqc2(Allegrex* cpu, const u32 instr) {
+    const u32 vt = ((UIMM & 1) << 5) | RT;
+    const u32 addr = cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3);
+
+    assert((addr & 0xF) == 0);
+
+    const u32 vec[4] = {
+        cpu->read<u32>(addr + 0 * sizeof(u32)),
+        cpu->read<u32>(addr + 1 * sizeof(u32)),
+        cpu->read<u32>(addr + 2 * sizeof(u32)),
+        cpu->read<u32>(addr + 3 * sizeof(u32))
+    };
+
+    cpu->set_quad_vector_raw(vt, vec);
     return 1;
 }
 
@@ -601,7 +651,9 @@ static i64 i_lw(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_lwc1(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU));
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU)) {
+        return 1;
+    }
 
     cpu->set_fgr_raw(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
     return 1;
@@ -639,7 +691,9 @@ static i64 i_max(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_mfc(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(cop_num));
+    if (!cpu->is_coprocessor_usable(cop_num)) {
+        return 1;
+    }
 
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
@@ -671,6 +725,21 @@ static i64 i_mflo(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_mfvc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    cpu->set_reg(RT, cpu->get_vfpu_control_reg(UIMM & 0xFF));
+    return 1;
+}
+
+static i64 i_mfvme(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_ME);
+
+    cpu->get_logger()->info("MFVME {}, offset {:04X} @ {:08X}", RS, UIMM, cpu->get_instr_addr());
+    cpu->set_reg(RT, 1);
+    return 1;
+}
+
 static i64 i_min(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, std::min((i32)cpu->get_reg(RS), (i32)cpu->get_reg(RT)));
     return 1;
@@ -688,7 +757,9 @@ static i64 i_movz(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_mtc(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(cop_num));
+    if (!cpu->is_coprocessor_usable(cop_num)) {
+        return 1;
+    }
 
     switch (cop_num) {
         case CopNum::COP_NUM_CP0:
@@ -717,6 +788,20 @@ static i64 i_mtic(Allegrex* cpu, const u32 instr) {
 
 static i64 i_mtlo(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(32, cpu->get_reg(RS));
+    return 1;
+}
+
+static i64 i_mtvc(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    cpu->set_vfpu_control_reg(UIMM & 0xFF, cpu->get_reg(RT));
+    return 1;
+}
+
+static i64 i_mtvme(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_ME);
+
+    cpu->get_logger()->info("MTVME {}, offset {:04X}, data: {:08X} @ {:08X}", RS, UIMM, cpu->get_reg(RT), cpu->get_instr_addr());
     return 1;
 }
 
@@ -857,7 +942,9 @@ static i64 i_sw(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_swc1(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU));
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_FPU)) {
+        return 1;
+    }
 
     cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM, cpu->get_fgr_raw(RT));
     return 1;
@@ -891,6 +978,18 @@ static i64 i_syscall(Allegrex* cpu, const u32 instr) {
 
 static i64 i_truncw(Allegrex* cpu, const u32 instr) {
     cpu->set_fgr_raw(FD, (u32)std::truncf(cpu->get_fgr(FS)));
+    return 1;
+}
+
+static i64 i_vmzeroq(Allegrex* cpu, const u32 instr) {
+    constexpr f32 ZERO_MTX[4][4] = {
+        { 0, 0, 0, 0 },
+        { 0, 0, 0, 0 },
+        { 0, 0, 0, 0 },
+        { 0, 0, 0, 0 },
+    };
+
+    cpu->set_quad_matrix(VD, ZERO_MTX);
     return 1;
 }
 
@@ -951,12 +1050,7 @@ static i64 i_cache(Allegrex* cpu, const u32 instr) {
 
 template<int cop_num>
 static i64 i_cop(Allegrex* cpu, const u32 instr) {
-    assert(cpu->is_coprocessor_usable(cop_num));
-
-    if constexpr (cop_num == 2) {
-        assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
-
-        cpu->get_logger()->warn("Unimplemented COP2 instruction ({:08X})", instr);
+    if (!cpu->is_coprocessor_usable(cop_num)) {
         return 1;
     }
 
@@ -965,10 +1059,18 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
             return i_mfc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_CFC:
             return i_cfc<cop_num>(cpu, instr);
+        case CopOpcode::COP_OPCODE_MFVC:
+            assert(cop_num == CopNum::COP_NUM_VFPU);
+
+            return i_mfvc(cpu, instr);
         case CopOpcode::COP_OPCODE_MTC:
             return i_mtc<cop_num>(cpu, instr);
         case CopOpcode::COP_OPCODE_CTC:
             return i_ctc<cop_num>(cpu, instr);
+        case CopOpcode::COP_OPCODE_MTVC:
+            assert(cop_num == CopNum::COP_NUM_VFPU);
+
+            return i_mtvc(cpu, instr);
         case CopOpcode::COP_OPCODE_BC:
             switch (RT) {
                 case CopBranchOpcode::COP_BRANCH_OPCODE_BCF:
@@ -1012,6 +1114,8 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                         return i_fdiv(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_SQRT:
                         return i_fsqrt(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_ABS:
+                        return i_fabs(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_MOV:
                         return i_fmov(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_NEG:
@@ -1113,17 +1217,64 @@ static i64 i_special3(Allegrex* cpu, const u32 instr) {
     }
 }
 
-static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
+static i64 i_vfpu(Allegrex* cpu, const u32 instr) {
     assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
 
-    cpu->get_logger()->warn("Unimplemented VFPU6 instruction ({:08X})", instr);
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    cpu->get_logger()->warn("Unimplemented VFPU instruction {:08X} @ {:08X}", instr, cpu->get_instr_addr());
     return 1;
 }
 
-static i64 i_vfpu7(Allegrex* cpu, const u32 instr) {
+enum Vfpu6Opcode {
+    VFPU6_OPCODE_VMZERO = 6,
+};
+
+static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
     assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
 
-    cpu->get_logger()->warn("Unimplemented VFPU7 instruction ({:08X})", instr);
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    const u32 opcode = (instr >> 23) & 7;
+    const u32 format = ((instr >> 14) & 2) | ((instr >> 7) & 1);
+
+    // Not sure how to cleanly decode these instructions lmao
+    switch (opcode) {
+        case 7:
+            switch (VT) {
+                case Vfpu6Opcode::VFPU6_OPCODE_VMZERO:
+                    switch (format) {
+                        case 3:
+                            return i_vmzeroq(cpu, instr);
+                        default:
+                            cpu->get_logger()->warn("Unimplemented VMZERO format {} ({:08X}) @ {:08X}", format, instr, cpu->get_instr_addr());
+                            exit(1);
+                    }
+                    break;
+                default:
+                    cpu->get_logger()->warn("Unimplemented VFPU6:{} instruction {} ({:08X}) @ {:08X}", opcode, VT, instr, cpu->get_instr_addr());
+                    exit(1);
+            }
+            break;
+        default:
+            cpu->get_logger()->warn("Unimplemented VFPU6 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            exit(1);
+    }
+}
+
+static i64 i_vfpu7(Allegrex* cpu, const u32) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    // This group is only populated with VFLUSH, VNOP and VSYNC, so we can
+    // more or less safely ignore this
     return 1;
 }
 
@@ -1139,6 +1290,10 @@ static i64 i_undefined_secondary(Allegrex* cpu, const u32 instr) {
     cpu->get_logger()->error("Undefined secondary instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
     cpu->dump_state();
     exit(1);
+}
+
+static i64 dummy(Allegrex* cpu, const u32) {
+    return 1;
 }
 
 void initialize() {
@@ -1168,6 +1323,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
     primary_table[Opcode::OPCODE_BGTZL   ] = i_bgtzl;
+    primary_table[Opcode::OPCODE_MFVME   ] = i_mfvme;
     primary_table[Opcode::OPCODE_SPECIAL2] = i_special2;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
@@ -1181,6 +1337,7 @@ void initialize() {
     primary_table[Opcode::OPCODE_SH      ] = i_sh;
     primary_table[Opcode::OPCODE_SWL     ] = i_swl;
     primary_table[Opcode::OPCODE_SW      ] = i_sw;
+    primary_table[Opcode::OPCODE_MTVME   ] = i_mtvme;
     primary_table[Opcode::OPCODE_SWR     ] = i_swr;
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
     primary_table[Opcode::OPCODE_LL      ] = i_ll;
@@ -1202,6 +1359,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_MOVZ   ] = i_movz;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MOVN   ] = i_movn;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SYSCALL] = i_syscall;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_BREAK  ] = i_break;
     special_table[SpecialOpcode::SPECIAL_OPCODE_SYNC   ] = i_sync;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MFHI   ] = i_mfhi;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MTHI   ] = i_mthi;
@@ -1225,6 +1383,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU   ] = i_sltu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MAX    ] = i_max;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MIN    ] = i_min;
+    special_table[0x2E ] = dummy;
 }
 
 void soft_reset() {
