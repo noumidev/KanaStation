@@ -194,12 +194,20 @@ static void common_read(const u8 command) {
             data = 13094;
             break;
         case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY:
-        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY_ANALOG:
-            // TODO: return analog stick data
             logger->debug("GET_KERNEL_DIGITAL_KEY");
             
             data = kanacore::get_button_state();
             break;
+        case SysconCommand::SYSCON_COMMAND_GET_KERNEL_DIGITAL_KEY_ANALOG: {
+            logger->debug("GET_KERNEL_DIGITAL_KEY_ANALOG");
+
+            u32 keys[2] = {
+                kanacore::get_button_state(), 0x80808080,
+            };
+            
+            write_transmit_data((u8*)&keys, sizeof(keys));
+            return;
+        }
         case SysconCommand::SYSCON_COMMAND_READ_CLOCK:
             logger->debug("READ_CLOCK");
             
@@ -375,8 +383,6 @@ static void command_tachyon_handshake() {
     const u32 exchange = buf[0];
 
     logger->debug("TACHYON_HANDSHAKE: {:02X}", exchange);
-
-    exit(1);
 
     static u8 auth_data[8][8] = {};
 
