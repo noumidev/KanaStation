@@ -199,6 +199,9 @@ struct Vertex {
     f32 r, g, b, a;
     bool has_colors;
 
+    f32 weights[8];
+    bool has_weights;
+
     f32 nx, ny, nz;
     bool has_normals;
 
@@ -349,6 +352,8 @@ static struct Context {
 
         u32 ref, mask;
     } alpha_test;
+
+    u8 alpha_mask;
 
     struct {
         bool enable;
@@ -509,6 +514,20 @@ void hard_reset() {
 
 void shutdown() {
 
+}
+
+template<typename T>
+static T read(const u32 addr) {
+    bus::Bus* bus = kanacore::get_sc_bus_ptr();
+
+    return bus->read<T>(addr & 0x1FFFFFFF);
+}
+
+template<typename T>
+static void write(const u32 addr, const T data) {
+    bus::Bus* bus = kanacore::get_sc_bus_ptr();
+
+    bus->write<T>(addr & 0x1FFFFFFF, data);
 }
 
 void set_base(const u32 data) {
@@ -862,12 +881,10 @@ void set_light_color(const u32 light_idx, const u32 idx, const u32 data) {
 }
 
 void set_framebuffer_base(const u32 addr_lo) {
-    assert((addr_lo & 0x1FFF) == 0);
-
     u32& addr = ctx.framebuffer.addr;
 
     addr &= ~0xFFFFFF;
-    addr |= addr_lo;
+    addr |= addr_lo & ~0x1FFF;
 
     logger->debug("Framebuffer address: {:08X}", addr);
 }
@@ -1064,8 +1081,6 @@ void set_fast_mode(const bool enable) {
 }
 
 void load_clut(const u32 num_palettes) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     if (num_palettes == 0) {
         return;
     }
@@ -1082,10 +1097,10 @@ void load_clut(const u32 num_palettes) {
     for (u32 palette = 0; palette < num_palettes; palette++) {
         for (u32 i = 0; i < 8; i++) {
             if (is_full_color) {
-                clut.data[8 * palette + i].full = bus->read<u32>(clut_addr + sizeof(u32) * i);
+                clut.data[8 * palette + i].full = read<u32>(clut_addr + sizeof(u32) * i);
             } else {
-                clut.data[8 * palette + i].half[0] = bus->read<u16>(clut_addr + sizeof(u32) * i + 0);
-                clut.data[8 * palette + i].half[1] = bus->read<u16>(clut_addr + sizeof(u32) * i + 2);
+                clut.data[8 * palette + i].half[0] = read<u16>(clut_addr + sizeof(u32) * i + 0);
+                clut.data[8 * palette + i].half[1] = read<u16>(clut_addr + sizeof(u32) * i + 2);
             }
         }
 
@@ -1175,7 +1190,7 @@ void set_maximum_depth(const u16 maxz) {
 void set_alpha_test(const u32 data) {
     ctx.alpha_test.test = (Test)(data & 7);
     ctx.alpha_test.ref  = (data >>  8) & 0xFF;
-    ctx.alpha_test.mask = (data >> 12) & 0xFF;
+    ctx.alpha_test.mask = (data >> 16) & 0xFF;
 }
 
 void set_depth_test(const u32 data) {
@@ -1232,15 +1247,13 @@ void set_color_mask(const u32 data) {
 }
 
 void set_alpha_mask(const u32 data) {
-    assert(data == 0);
-
     logger->debug("Alpha mask: {:02X}", data);
+
+    ctx.alpha_mask = data;
 }
 
 void start_transfer(const bool is_full_color) {
     assert(is_full_color);
-
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
     auto& transfer = ctx.transfer;
 
@@ -1249,9 +1262,9 @@ void start_transfer(const bool is_full_color) {
 
     for (u32 y = 0; y <= transfer.height; y++) {
         for (u32 x = 0; x <= transfer.width; x++) {
-            bus->write<u32>(
+            write<u32>(
                 dst_buffer.addr + sizeof(u32) * ((transfer.sy2 + y) * dst_buffer.width + (transfer.sx2 + x)),
-                bus->read<u32>(
+                read<u32>(
                     src_buffer.addr + sizeof(u32) * ((transfer.sy1 + y) * src_buffer.width + (transfer.sx1 + x))
                 )
             );
@@ -1353,10 +1366,10 @@ static inline u8 color_clamp(const int color) {
 
 static inline Color color_add(const Color src_color, const Color dst_color) {
     return Color {
-        .r = color_clamp(src_color.r + dst_color.r),
-        .g = color_clamp(src_color.g + dst_color.g),
-        .b = color_clamp(src_color.b + dst_color.b),
-        .a = color_clamp(src_color.a + dst_color.a),
+        .r = color_clamp((int)src_color.r + (int)dst_color.r),
+        .g = color_clamp((int)src_color.g + (int)dst_color.g),
+        .b = color_clamp((int)src_color.b + (int)dst_color.b),
+        .a = color_clamp((int)src_color.a + (int)dst_color.a),
     };
 }
 
@@ -1366,19 +1379,19 @@ static inline u8 color_add(const int src_color, const int dst_color) {
 
 static inline Color color_subtract(const Color src_color, const Color dst_color) {
     return Color {
-        .r = color_clamp(src_color.r - dst_color.r),
-        .g = color_clamp(src_color.g - dst_color.g),
-        .b = color_clamp(src_color.b - dst_color.b),
-        .a = color_clamp(src_color.a - dst_color.a),
+        .r = color_clamp((int)src_color.r - (int)dst_color.r),
+        .g = color_clamp((int)src_color.g - (int)dst_color.g),
+        .b = color_clamp((int)src_color.b - (int)dst_color.b),
+        .a = color_clamp((int)src_color.a - (int)dst_color.a),
     };
 }
 
 static inline Color color_multiply(const Color src_color, const Color dst_color) {
     return Color {
-        .r = (u8)((src_color.r * dst_color.r) / 255),
-        .g = (u8)((src_color.g * dst_color.g) / 255),
-        .b = (u8)((src_color.b * dst_color.b) / 255),
-        .a = (u8)((src_color.a * dst_color.a) / 255),
+        .r = (u8)(((int)src_color.r * (int)dst_color.r) / 255),
+        .g = (u8)(((int)src_color.g * (int)dst_color.g) / 255),
+        .b = (u8)(((int)src_color.b * (int)dst_color.b) / 255),
+        .a = (u8)(((int)src_color.a * (int)dst_color.a) / 255),
     };
 }
 
@@ -1395,6 +1408,8 @@ static void calculate_lighting(std::vector<Vertex>& vertices) {
         if (lighting.enable) {
             // Set color to model emission color + global ambient
             final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
+        } else {
+            final_color = vertex_color;
         }
 
         vertex.r = final_color.r;
@@ -1407,8 +1422,6 @@ static void calculate_lighting(std::vector<Vertex>& vertices) {
 static Vertex fetch_vertex(u32 addr) {
     assert(ctx.vertex_type.modcoord_type != ModcoordType::MODCOORD_TYPE_NONE);
 
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     Vertex vertex{ .addr = addr };
 
     const bool through_mode = ctx.vertex_type.through_mode;
@@ -1420,6 +1433,14 @@ static Vertex fetch_vertex(u32 addr) {
         switch (weight_type) {
             case WeightType::WEIGHT_TYPE_NONE:
                 break;
+            case WeightType::WEIGHT_TYPE_F32: {
+                for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
+                    vertex.weights[i] = from_u32(read<u32>(addr));
+
+                    addr += sizeof(f32);
+                }
+                break;
+            }
             default:
                 logger->error("Unimplemented weight type {}", VTYPE_WT_NAMES[weight_type]);
                 exit(1);
@@ -1434,14 +1455,14 @@ static Vertex fetch_vertex(u32 addr) {
         case TexcoordType::TEXCOORD_TYPE_NONE:
             break;
         case TexcoordType::TEXCOORD_TYPE_FP16:
-            vertex.s = (f32)(u16)bus->read<u16>(addr + 0);
-            vertex.t = (f32)(u16)bus->read<u16>(addr + 2);
+            vertex.s = (f32)(u16)read<u16>(addr + 0);
+            vertex.t = (f32)(u16)read<u16>(addr + 2);
 
             addr += 2 * sizeof(u16);
             break;
         case TexcoordType::TEXCOORD_TYPE_F32:
-            vertex.s = from_u32(bus->read<u32>(addr + 0));
-            vertex.t = from_u32(bus->read<u32>(addr + 4));
+            vertex.s = from_u32(read<u32>(addr + 0));
+            vertex.t = from_u32(read<u32>(addr + 4));
 
             addr += 2 * sizeof(f32);
             break;
@@ -1459,7 +1480,7 @@ static Vertex fetch_vertex(u32 addr) {
             vertex.has_colors = false;
             break;
         case ColorType::COLOR_TYPE_RGBA8888: {
-            const u32 color = bus->read<u32>(addr);
+            const u32 color = read<u32>(addr);
 
             vertex.a = (color >> 24) & 0xFF;
             vertex.b = (color >> 16) & 0xFF;
@@ -1484,9 +1505,9 @@ static Vertex fetch_vertex(u32 addr) {
             case NormalType::NORMAL_TYPE_NONE:
                 break;
             case NormalType::NORMAL_TYPE_F32:
-                vertex.nx = from_u32(bus->read<u32>(addr + 0));
-                vertex.ny = from_u32(bus->read<u32>(addr + 4));
-                vertex.nz = from_u32(bus->read<u32>(addr + 8));
+                vertex.nx = from_u32(read<u32>(addr + 0));
+                vertex.ny = from_u32(read<u32>(addr + 4));
+                vertex.nz = from_u32(read<u32>(addr + 8));
 
                 addr += 3 * sizeof(f32);
                 break;
@@ -1500,14 +1521,14 @@ static Vertex fetch_vertex(u32 addr) {
 
     switch (modcoord_type) {
         case ModcoordType::MODCOORD_TYPE_FP16:
-            vertex.x = (f32)(i16)bus->read<u16>(addr + 0);
-            vertex.y = (f32)(i16)bus->read<u16>(addr + 2);
-            vertex.z = (f32)(i16)bus->read<u16>(addr + 4);
+            vertex.x = (f32)(i16)read<u16>(addr + 0);
+            vertex.y = (f32)(i16)read<u16>(addr + 2);
+            vertex.z = (f32)(i16)read<u16>(addr + 4);
             break;
         case ModcoordType::MODCOORD_TYPE_F32:
-            vertex.x = from_u32(bus->read<u32>(addr + 0));
-            vertex.y = from_u32(bus->read<u32>(addr + 4));
-            vertex.z = from_u32(bus->read<u32>(addr + 8));
+            vertex.x = from_u32(read<u32>(addr + 0));
+            vertex.y = from_u32(read<u32>(addr + 4));
+            vertex.z = from_u32(read<u32>(addr + 8));
             break;
         default:
             logger->error("Unimplemented modcoord type {}", VTYPE_VT_NAMES[modcoord_type]);
@@ -1577,8 +1598,6 @@ static void transform_and_lighting(std::vector<Vertex>& vertices, const bool is_
 }
 
 static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_enable = false, const bool is_rectangle = false) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     std::vector<Vertex> vertices(count);
 
     const bool morph_enable = !ctx.vertex_type.through_mode && (ctx.vertex_type.num_morph > 0);
@@ -1596,10 +1615,10 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_
                 vertex_addr += num_vertices * i * ctx.vertex_size;
                 break;
             case IndexType::INDEX_TYPE_U8:
-                vertex_addr += num_vertices * ctx.vertex_size * bus->read<u8>(ctx.index_addr + i);
+                vertex_addr += num_vertices * ctx.vertex_size * read<u8>(ctx.index_addr + i);
                 break;
             case IndexType::INDEX_TYPE_U16:
-                vertex_addr += num_vertices * ctx.vertex_size * bus->read<u16>(ctx.index_addr + i * sizeof(u16));
+                vertex_addr += num_vertices * ctx.vertex_size * read<u16>(ctx.index_addr + i * sizeof(u16));
                 break;
             default:
                 logger->error("Invalid index type");
@@ -1706,6 +1725,22 @@ static u32 swizzle_to_linear(const u32 u, const u32 v, const u32 width, const u3
     return ((v / 8) * width * bpp) + (16 * (v % 8)) + (ubpp & ~127) + ((ubpp & 127) / 8);
 }
 
+static u32 from_rgba5551(const u16 color) {
+    Color new_color;
+
+    new_color.r = ((color >>  0) & 0x1F) << 3;
+    new_color.g = ((color >>  5) & 0x1F) << 3;
+    new_color.b = ((color >> 10) & 0x1F) << 3;
+    new_color.a = ((color >> 15) & 0x01) << 0;
+
+    new_color.r |= new_color.r >> 5;
+    new_color.g |= new_color.g >> 5;
+    new_color.b |= new_color.b >> 5;
+    new_color.a *= 0xFF;
+
+    return new_color.raw;
+}
+
 static u32 from_rgba4444(const u16 color) {
     Color new_color;
 
@@ -1742,13 +1777,20 @@ static u32 fetch_clut(const u32 idx) {
 }
 
 static u32 fetch_texel(const u32 u, const u32 v) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     // For now we use texture 0. The rest is related to MIP mapping
     const u32 tex0_addr = ctx.texture[0].addr;
     const u32 tex0_buf_width = ctx.texture[0].buf_width;
 
     switch (ctx.texture_format) {
+        case TexelFormat::TEXEL_FORMAT_RGBA5551: {
+            u32 offset = sizeof(u16) * (v * tex0_buf_width + u);
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 16);
+            }
+
+            return from_rgba5551(read<u16>(tex0_addr + offset));
+        }
         case TexelFormat::TEXEL_FORMAT_RGBA8888: {
             u32 offset = sizeof(u32) * (v * tex0_buf_width + u);
 
@@ -1756,7 +1798,7 @@ static u32 fetch_texel(const u32 u, const u32 v) {
                 offset = swizzle_to_linear(u, v, tex0_buf_width, 32);
             }
 
-            return bus->read<u32>(tex0_addr + offset);
+            return read<u32>(tex0_addr + offset);
         }
         case TexelFormat::TEXEL_FORMAT_IDX4: {
             u32 offset = (v * tex0_buf_width + u) / 2;
@@ -1767,7 +1809,7 @@ static u32 fetch_texel(const u32 u, const u32 v) {
 
             const u32 u_offset = 4 * (u & 1);
 
-            return fetch_clut((bus->read<u8>(tex0_addr + offset) >> u_offset) & 0xF);
+            return fetch_clut((read<u8>(tex0_addr + offset) >> u_offset) & 0xF);
         }
         case TexelFormat::TEXEL_FORMAT_IDX8: {
             u32 offset = v * tex0_buf_width + u;
@@ -1776,7 +1818,7 @@ static u32 fetch_texel(const u32 u, const u32 v) {
                 offset = swizzle_to_linear(u, v, tex0_buf_width, 8);
             }
 
-            return fetch_clut(bus->read<u8>(tex0_addr + offset));
+            return fetch_clut(read<u8>(tex0_addr + offset));
         }
         default:
             logger->error("Unimplemented texture format {}", TEXEL_FORMAT_NAMES[ctx.texture_format]);
@@ -1787,22 +1829,18 @@ static u32 fetch_texel(const u32 u, const u32 v) {
 }
 
 static u32 read_framebuffer(const u32 x, const u32 y) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     const auto& framebuffer = ctx.framebuffer;
 
     // This will do automatic format conversion when we add other formats
-    return bus->read<u32>(framebuffer.addr + sizeof(u32) * (y * framebuffer.width + x));
+    return read<u32>(framebuffer.addr + sizeof(u32) * (y * framebuffer.width + x));
 }
 
 static std::array<u16, 480 * 272> z_buffer;
 
 static u16 read_depth_buffer(const u32 x, const u32 y) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     const auto& depth_buffer = ctx.depth_buffer;
 
-    // return bus->read<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x));
+    // return read<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x));
 
     // I've had some issues with depth buffers corrupting some memory allocator's
     // state in VRAM, so for now we will render to this external buffer
@@ -1810,20 +1848,16 @@ static u16 read_depth_buffer(const u32 x, const u32 y) {
 }
 
 static void write_framebuffer(const u32 x, const u32 y, const u32 color) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     const auto& framebuffer = ctx.framebuffer;
 
     // This will do automatic format conversion when we add other formats
-    bus->write<u32>(framebuffer.addr + sizeof(u32) * (y * framebuffer.width + x), color);
+    write<u32>(framebuffer.addr + sizeof(u32) * (y * framebuffer.width + x), color);
 }
 
 static void write_depth_buffer(const u32 x, const u32 y, const u16 depth) {
-    bus::Bus* bus = kanacore::get_sc_bus_ptr();
-
     const auto& depth_buffer = ctx.depth_buffer;
 
-    //bus->write<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x), depth);
+    //write<u16>(depth_buffer.addr + sizeof(u16) * (y * depth_buffer.width + x), depth);
 
     z_buffer[y * 480 + x] = depth;
 }
@@ -1839,6 +1873,10 @@ static bool depth_range_test(const u16 depth) {
 
 static bool alpha_test(u32 alpha) {
     auto& alpha_test = ctx.alpha_test;
+
+    if (ctx.clear_mode.enable) {
+        return true;
+    }
 
     if (alpha_test.enable) {
         const u32 ref = alpha_test.ref & alpha_test.mask;
@@ -1870,6 +1908,14 @@ static bool alpha_test(u32 alpha) {
 
 static bool depth_test(const u32 x, const u32 y, const u16 depth) {
     auto& depth_test = ctx.depth_test;
+
+    if (ctx.clear_mode.enable) {
+        if (ctx.clear_mode.depth_enable) {
+            write_depth_buffer(x, y, depth);
+        }
+
+        return true;
+    }
 
     if (depth_test.enable) {
         const u16 old_depth = read_depth_buffer(x, y);
@@ -1918,15 +1964,15 @@ static bool depth_test(const u32 x, const u32 y, const u16 depth) {
     return true;
 }
 
-static Color blend(const Color color, const u32 x, const u32 y) {
+static Color blend(const Color color, const Color old_color) {
     auto& blend_params = ctx.blend_params;
 
-    if (!blend_params.enable) {
+    if (!blend_params.enable || ctx.clear_mode.enable) {
         return color;
     }
 
     const Color src_color = color;
-    const Color dst_color = Color{ .raw = read_framebuffer(x, y) };
+    const Color dst_color = old_color;
     
     Color a_color, b_color;
 
@@ -2001,6 +2047,10 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             final_color.b = color_multiply(vertex_color.b, tex_color.b);
             final_color.a = color_multiply(vertex_color.a, tex_color.a);
             break;
+        case 3:
+            // Replace
+            final_color = tex_color;
+            break;
         default:
             logger->error("Unimplemented texture function {}", blend_params.func);
             exit(1);
@@ -2055,11 +2105,6 @@ static void draw_rectangle(const Vertex a, const Vertex b) {
         b.x, b.y, b.z
     );
 
-    if (ctx.clear_mode.enable) {
-        assert(ctx.clear_mode.color_enable);
-        assert(ctx.clear_mode.alpha_enable);
-    }
-
     const int x_min = std::round(std::max(std::min(a.x, b.x), (f32)ctx.scissor.sx1));
     const int x_max = std::round(std::min(std::max(a.x, b.x), (f32)ctx.scissor.sx2));
     const int y_min = std::round(std::max(std::min(a.y, b.y), (f32)ctx.scissor.sy1));
@@ -2085,6 +2130,10 @@ static void draw_rectangle(const Vertex a, const Vertex b) {
     }
 
     const u16 z = (u16)b.z;
+            
+    if (!depth_range_test(z)) {
+        return;
+    }
 
     const f32 ds = (b.s - a.s) / (b.x - a.x);
     const f32 dt = (b.t - a.t) / (b.y - a.y);
@@ -2154,16 +2203,35 @@ static void draw_rectangle(const Vertex a, const Vertex b) {
             } else {
                 final_color = vertex_color;
             }
-            
-            if (!depth_range_test(z)) {
+
+            if (!alpha_test(final_color.a)) {
                 continue;
             }
 
-            write_framebuffer(x, y, final_color.raw);
-
-            if (!ctx.clear_mode.enable || ctx.clear_mode.depth_enable) {
-                write_depth_buffer(x, y, z);
+            if (!depth_test(x, y, z)) {
+                continue;
             }
+
+            const Color old_color = { read_framebuffer(x, y) };
+
+            final_color = blend(final_color, old_color);
+
+            if (ctx.dithering.enable) {
+                const int dither_coeff = ctx.dithering.matrix[y & 3][x & 3];
+
+                final_color.r = color_add(final_color.r, dither_coeff);
+                final_color.g = color_add(final_color.g, dither_coeff);
+                final_color.b = color_add(final_color.b, dither_coeff);
+            }
+
+            if (ctx.clear_mode.enable && !ctx.clear_mode.alpha_enable) {
+                final_color.a = old_color.a;
+            } else if (ctx.alpha_mask > 0) {
+                final_color.a &= ~ctx.alpha_mask;
+                final_color.a |= old_color.a & ctx.alpha_mask;
+            }
+
+            write_framebuffer(x, y, final_color.raw);
         }
     }
 }
@@ -2183,6 +2251,11 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
     }
 
     const f32 area = edge_function(a, b, c);
+
+    if (area == 0) {
+        // This triangle is degenerate and can't really be drawn
+        return;
+    }
 
     // Calculate bounding box
     const int x_min = std::round(std::max(std::min(c.x, std::min(a.x, b.x)), (f32)ctx.scissor.sx1));
@@ -2212,10 +2285,6 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     continue;
                 }
 
-                if (!depth_test(x, y, z)) {
-                    continue;
-                }
-
                 Color vertex_color, final_color;
 
                 if (a.has_colors) {
@@ -2235,7 +2304,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     vertex_color = ctx.lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT];
                 }
 
-                if (ctx.texture_mapping_enable) {
+                if (ctx.texture_mapping_enable && !ctx.clear_mode.enable) {
                     f32 s, t;
                     f32 u, v;
 
@@ -2292,7 +2361,13 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     continue;
                 }
 
-                final_color = blend(final_color, x, y);
+                if (!depth_test(x, y, z)) {
+                    continue;
+                }
+
+                const Color old_color = { read_framebuffer(x, y) };
+
+                final_color = blend(final_color, old_color);
 
                 if (ctx.dithering.enable) {
                     const int dither_coeff = ctx.dithering.matrix[y & 3][x & 3];
@@ -2302,8 +2377,14 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                     final_color.b = color_add(final_color.b, dither_coeff);
                 }
 
+                if (ctx.clear_mode.enable && !ctx.clear_mode.alpha_enable) {
+                    final_color.a = old_color.a;
+                } else if (ctx.alpha_mask > 0) {
+                    final_color.a &= ~ctx.alpha_mask;
+                    final_color.a |= old_color.a & ctx.alpha_mask;
+                }
+
                 write_framebuffer(p.x, p.y, final_color.raw);
-                write_depth_buffer(p.x, p.y, z);
             }
         }
     }
@@ -2321,6 +2402,14 @@ void draw_primitive(const u32 count, const u32 prim_type) {
     const std::vector<Vertex> vertices = fetch_vertices(count, true, is_rectangle);
 
     switch (prim_type) {
+        case PrimType::PRIM_TYPE_TRIANGLE: {
+            assert((count % 3) == 0);
+
+            for (u32 i = 0; i < count; i += 3) {
+                draw_triangle(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+            }
+            break;
+        }
         case PrimType::PRIM_TYPE_TRIANGLE_STRIP: {
             assert(count > 2);
 
@@ -2406,7 +2495,7 @@ static void draw_bezier_patch(
                     const f32 bernstein_u = get_bernstein_value(i, u_sub);
                     const f32 bernstein_v = get_bernstein_value(j, v_sub);
 
-                    const Vertex& control_point = control_points[(patch_v + j) * u_count + patch_v + i];
+                    const Vertex& control_point = control_points[(patch_v + j) * u_count + patch_u + i];
 
                     vertex.x += bernstein_u * bernstein_v * control_point.x;
                     vertex.y += bernstein_u * bernstein_v * control_point.y;
