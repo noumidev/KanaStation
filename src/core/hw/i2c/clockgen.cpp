@@ -44,6 +44,8 @@ static void read_reg(std::vector<u8>& data) {
     switch (ctx.reg_addr) {
         case RegisterAddress::REGISTER_ADDRESS_ALL:
             logger->debug("ALL read");
+            // Needs to return the number of registers first, which is 3...
+            data.push_back(3);
             data.push_back(REVISION);
             data.push_back(ctx.clock_control);
             data.push_back(ctx.ss_control);
