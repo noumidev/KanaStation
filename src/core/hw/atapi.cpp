@@ -62,7 +62,8 @@ enum IoAddress {
 };
 
 enum AtaCommand {
-    ATA_COMMAND_PACKET = 0xA0,
+    ATA_COMMAND_PACKET       = 0xA0,
+    ATA_COMMAND_SET_FEATURES = 0xEF,
 };
 
 enum ScsiCommand {
@@ -92,6 +93,7 @@ enum AtapiState {
     ATAPI_STATE_AWAIT_DATA,
 };
 
+#define HW_ATAPI_AHB_CONTROL ctx.ahb.control
 #define HW_ATAPI_AHB_PIOCTRL ctx.ahb.pio_control
 #define HW_ATAPI_AHB_INTR    ctx.ahb.interrupt
 #define HW_ATAPI_AHB_DEVSTAT ctx.ahb.device_status
@@ -108,6 +110,7 @@ enum AtapiState {
 static struct {
     // I wonder if the AHB regs have any connection to SPOCK/LEPTON
     struct {
+        u32 control;
         u32 pio_control;
         u32 interrupt; // Combined mask/status?
         u32 device_status;
@@ -277,7 +280,10 @@ static inline void set_reason(const bool is_command, const bool from_device) {
 
 static void assert_interrupt() {
     if (!HW_ATAPI_DEVCTRL.interrupt_disable) {
-        intc::assert_sc_interrupt(ATA_INTERRUPT);
+        // I need to figure out how this interrupt is triggered exactly...
+        // All later firmwares seem to do well without this interrupt,
+        // and 1.00 will even hang if it's triggered
+        // intc::assert_sc_interrupt(ATA_INTERRUPT);
     }
 }
 
@@ -715,11 +721,20 @@ static void ata_command_packet() {
     set_reason(true, false);
 }
 
+static void ata_command_set_features() {
+    logger->debug("ATA SET_FEATURES");
+
+    set_reason(true, false);
+}
+
 static void end_ata_command(const int command) {
     switch (command) {
         case AtaCommand::ATA_COMMAND_PACKET:
             ata_command_packet();
             state_transition(AtapiState::ATAPI_STATE_AWAIT_PACKET);
+            break;
+        case AtaCommand::ATA_COMMAND_SET_FEATURES:
+            ata_command_set_features();
             break;
         default:
             logger->error("Unimplemented ATA command {:02X}", command);
@@ -736,13 +751,19 @@ static void start_ata_command(const u8 command) {
 
     HW_ATAPI_STATUS.busy = 1;
 
-    scheduler::schedule_event(
-        event_id,
-        end_ata_command,
-        command,
-        scheduler::from_microseconds(1000),
-        true
-    );
+    // Some more commands probably finish "instantly", but OFW 1.00
+    // implies SET_FEATURES does for sure
+    if (command != AtaCommand::ATA_COMMAND_SET_FEATURES) {
+        scheduler::schedule_event(
+            event_id,
+            end_ata_command,
+            command,
+            scheduler::from_microseconds(1000),
+            true
+        );
+    } else {
+        end_ata_command(command);
+    }
 }
 
 static u32 ahb_read(const u32 addr) {
@@ -750,9 +771,19 @@ static u32 ahb_read(const u32 addr) {
         case IoAddress::IO_ADDRESS_AHB_REVISION:
             logger->debug("AHB_REVISION read32");
             return AHB_REVISION;
+        case IoAddress::IO_ADDRESS_AHB_CONTROL:
+            logger->debug("AHB_CONTROL read32");
+            return HW_ATAPI_AHB_CONTROL;
         case IoAddress::IO_ADDRESS_AHB_PIOCTRL:
             logger->debug("AHB_PIOCTRL read32");
             return HW_ATAPI_AHB_PIOCTRL;
+        case IoAddress::IO_ADDRESS_AHB_INTR:
+            logger->debug("AHB_INTR read32");
+
+            // Weirdly enough, it seems that bit 0 is always 1, even after
+            // AHB reset(?)... maybe that's why the firmware doesn't enable the
+            // corresponding mask bit?
+            return HW_ATAPI_AHB_INTR | 1;
         case ATAPI_AHB_ADDR + 0x040:
             logger->warn("Unmapped AHB read32 @ {:08X}", addr);
             return 0;
@@ -809,6 +840,8 @@ static void ahb_write(const u32 addr, const u32 data) {
     switch (addr) {
         case IoAddress::IO_ADDRESS_AHB_CONTROL:
             logger->debug("AHB_CONTROL write32 = {:08X}", data);
+
+            HW_ATAPI_AHB_CONTROL = data;
             break;
         case IoAddress::IO_ADDRESS_AHB_RESET:
             logger->debug("AHB_RESET write32 = {:08X}", data);
@@ -824,11 +857,16 @@ static void ahb_write(const u32 addr, const u32 data) {
 
             HW_ATAPI_AHB_PIOCTRL = data;
             break;
-        case IoAddress::IO_ADDRESS_AHB_INTR:
+        case IoAddress::IO_ADDRESS_AHB_INTR: {
+            // These are the bits the CPU can set
+            constexpr u32 MASK = 0x03FF0000;
+
             logger->debug("AHB_INTR write32 = {:08X}", data);
 
-            HW_ATAPI_AHB_INTR = data;
+            HW_ATAPI_AHB_INTR &= ~MASK;
+            HW_ATAPI_AHB_INTR |= data & MASK;
             break;
+        }
         case IoAddress::IO_ADDRESS_AHB_DEVSTAT:
             logger->debug("AHB_DEVSTAT write32 = {:08X}", data);
 
