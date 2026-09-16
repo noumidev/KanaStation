@@ -336,6 +336,7 @@ static void write(const u32 addr, const u32 data) {
             logger->debug("CONNSTAT write32 = {:08X}", data);
             break;
         case SYSCTRL_ADDR + 0x03C:
+        case SYSCTRL_ADDR + 0x06C:
         case SYSCTRL_ADDR + 0x074:
             logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
