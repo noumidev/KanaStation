@@ -284,6 +284,7 @@ static void write(const u32 addr, const u32 data) {
         case AUDIO_ADDR + 0x018:
         case AUDIO_ADDR + 0x020:
         case AUDIO_ADDR + 0x02C:
+        case AUDIO_ADDR + 0x070:
             logger->warn("Unmapped write32 @ {:08X} = {:08X}", addr, data);
             break;
         default:
@@ -312,6 +313,7 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(AUDIO_ADDR, AUDIO_SIZE, page_desc);
+    kanacore::get_me_bus_ptr()->map(AUDIO_ADDR, AUDIO_SIZE, page_desc);
 
     soft_reset();
 }
