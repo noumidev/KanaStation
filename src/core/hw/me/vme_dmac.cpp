@@ -115,6 +115,7 @@ static void start_command() {
             scheduler::schedule_event(event_id, end_command, 0, scheduler::from_microseconds(5));
             return;
         case 0x03:
+        case 0x04:
         case 0x08:
             return;
         case 0x05:
@@ -122,6 +123,7 @@ static void start_command() {
         case 0x50:
         case 0x58:
         case 0x5A:
+        case 0x5B:
             length = HW_VMEDMAC_AGUOUT_LENGTH + 1;
 
             logger->debug("VME command {:02X} (length: {:04X})", command, length);
