@@ -6,6 +6,11 @@ mobo_type = "TA-082"
 # Boots emulator into service mode when true, reading an IPL from Memory Stick (REQUIRED)
 service_mode = false
 
+[hacks]
+# Renders the GE framebuffer directly and ignores certain SC2ME transfers.
+# Can cause flashing visuals and crunchy audio when sceMpeg is being used!!!
+dmacplus = false
+
 [ge]
 # Enables spline rendering
 splines = false

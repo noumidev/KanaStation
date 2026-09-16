@@ -117,7 +117,7 @@ void initialize(const Configuration config) {
     hw::ddr_ram::initialize(config);
     hw::display::initialize();
     hw::dmac::initialize();
-    hw::dmacplus::initialize();
+    hw::dmacplus::initialize(config);
     hw::i2c::initialize();
     hw::intc::initialize();
     hw::kirk::initialize();

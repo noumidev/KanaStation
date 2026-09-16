@@ -24,13 +24,16 @@ struct Configuration {
     // Enables service mode
     bool service_mode;
 
+    // Needed to "circumvent" sceMpeg issues
+    bool dmacplus_hacks;
+
     // Enables spline rendering (slow!)
     bool render_splines;
 
     // Path to a PSP boot ROM image
     const char* boot_path;
 
-    // Path to a NAND image (32 MB)
+    // Path to a NAND image (32 or 64 MB)
     const char* nand_path;
 
     // Path to a Memory Stick image (variable size)

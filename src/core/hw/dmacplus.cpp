@@ -21,6 +21,8 @@
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
 
+#include <core/hw/ge/rasterizer.hpp>
+
 namespace kanacore::hw::dmacplus {
 
 using namespace common;
@@ -142,6 +144,8 @@ static struct {
 } channels[NUM_CHANNELS];
 
 static struct {
+    bool dmacplus_hacks;
+
     u32 interrupt_status;
     u32 tc_interrupt_status;
     u32 error_interrupt_status;
@@ -218,6 +222,10 @@ static void start_transfer(const int chan_id) {
         "SC2ME", "ME2SC", "SC128",
     };
 
+    static constexpr u32 WORD_OFFSETS[2][4] = {
+        { 0, 1, 2, 3 }, { 1, 0, 3, 2 },
+    };
+
     static u32 event_id = scheduler::NO_EVENT_ID;
 
     auto& chan = channels[chan_id];
@@ -241,16 +249,23 @@ static void start_transfer(const int chan_id) {
     const u32 src_offset = chan.control.source_increment ? 4 : 0;
     const u32 dst_offset = chan.control.destination_increment ? 4 : 0;
 
+    const u32* src_word_offsets = WORD_OFFSETS[(chan.source_addr & 4) != 0];
+    const u32* dst_word_offsets = WORD_OFFSETS[(chan.destination_addr & 4) != 0];
+
     for (u32 i = 0; i < length; i++) {
-        const u32 src_addr = chan.source_addr & ADDR_MASK;
-        const u32 dst_addr = chan.destination_addr & ADDR_MASK;
+        const u32 src_addr = chan.source_addr & ADDR_MASK & ~7;
+        const u32 dst_addr = chan.destination_addr & ADDR_MASK & ~7;
 
-        assert(((src_addr & 0xF) == 0) && ((dst_addr & 0xF) == 0));
+        if (ctx.dmacplus_hacks && (chan_id == 0) && ((dst_addr & 0x08000000) == 0x08000000)) {
+            chan.source_addr += 4 * src_offset;
+            chan.destination_addr += 4 * dst_offset;
+            continue;
+        }
 
-        chan.dst_bus->write<u32>(dst_addr + 0 * dst_offset, chan.src_bus->read<u32>(src_addr + 0 * src_offset));
-        chan.dst_bus->write<u32>(dst_addr + 1 * dst_offset, chan.src_bus->read<u32>(src_addr + 1 * src_offset));
-        chan.dst_bus->write<u32>(dst_addr + 2 * dst_offset, chan.src_bus->read<u32>(src_addr + 2 * src_offset));
-        chan.dst_bus->write<u32>(dst_addr + 3 * dst_offset, chan.src_bus->read<u32>(src_addr + 3 * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + dst_word_offsets[0] * dst_offset, chan.src_bus->read<u32>(src_addr + src_word_offsets[0] * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + dst_word_offsets[1] * dst_offset, chan.src_bus->read<u32>(src_addr + src_word_offsets[1] * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + dst_word_offsets[2] * dst_offset, chan.src_bus->read<u32>(src_addr + src_word_offsets[2] * src_offset));
+        chan.dst_bus->write<u32>(dst_addr + dst_word_offsets[3] * dst_offset, chan.src_bus->read<u32>(src_addr + src_word_offsets[3] * src_offset));
 
         chan.source_addr += 4 * src_offset;
         chan.destination_addr += 4 * dst_offset;
@@ -436,10 +451,12 @@ static void write(const u32 addr, const u32 data) {
     }
 }
 
-void initialize() {
+void initialize(const Configuration config) {
     logger = spdlog::stdout_color_st("DMACplus");
 
     std::memset(&ctx, 0, sizeof(ctx));
+
+    ctx.dmacplus_hacks = config.dmacplus_hacks;
 }
 
 void soft_reset() {
@@ -481,18 +498,23 @@ void scanout() {
         HW_DMACPLUS_LCDC_FBCTRL.raw
     );
 
-    if (!HW_DMACPLUS_LCDC_FBCTRL.enable || (HW_DMACPLUS_LCDC_FBSTRIDE == 0)) {
+    if (!HW_DMACPLUS_LCDC_FBCTRL.enable || (!ctx.dmacplus_hacks && (HW_DMACPLUS_LCDC_FBSTRIDE == 0))) {
         framebuffer.fill(0);
         return;
     }
 
     assert(HW_DMACPLUS_LCDC_FBFORMAT == 0);
-    assert(HW_DMACPLUS_LCDC_FBWIDTH  == 480);
+
+    if (!ctx.dmacplus_hacks) {
+        assert(HW_DMACPLUS_LCDC_FBWIDTH == 480);
+    }
 
     for (u32 y = 0; y < 272; y++) {
         for (u32 x = 0; x < 480; x++) {
             framebuffer[y * 480 + x] = bus->read<u32>(
-                HW_DMACPLUS_LCDC_FBADDR + sizeof(u32) * (y * HW_DMACPLUS_LCDC_FBSTRIDE + x)
+                ctx.dmacplus_hacks ?
+                    ge::rasterizer::get_fb_addr() + sizeof(u32) * (y * ge::rasterizer::get_fb_width() + x) :
+                    HW_DMACPLUS_LCDC_FBADDR + sizeof(u32) * (y * HW_DMACPLUS_LCDC_FBSTRIDE + x)
             );
         }
     }

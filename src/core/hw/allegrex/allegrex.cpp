@@ -23,7 +23,7 @@ namespace kanacore::hw::allegrex {
     
 using namespace common;
 
-constexpr bool SILENT_JUMPS = true;
+constexpr bool SILENT_JUMPS = false;
 
 constexpr u32 BOOT_EXCEPTION_ADDR = 0xBFC00000;
 

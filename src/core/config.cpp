@@ -51,6 +51,9 @@ Configuration parse_args() {
 
         config.service_mode = table.at_path("core.service_mode").value_or<bool>(false);
 
+        // DMACplus hacks
+        config.dmacplus_hacks = table.at_path("hacks.dmacplus").value_or<bool>(false);
+
         // GraphicsEngine config
         config.render_splines = table.at_path("ge.splines").value_or<bool>(false);
 

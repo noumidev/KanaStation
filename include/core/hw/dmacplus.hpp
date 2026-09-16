@@ -8,10 +8,11 @@
 #pragma once
 
 #include <common/types.hpp>
+#include <core/config.hpp>
 
 namespace kanacore::hw::dmacplus {
 
-void initialize();
+void initialize(const Configuration config);
 void soft_reset();
 void hard_reset();
 void shutdown();
