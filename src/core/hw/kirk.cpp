@@ -618,13 +618,11 @@ static i32 command_decrypt_private() {
         return KirkResult::KIRK_RESULT_INVALID_DATA_SIG;
     }
 
-    body_size = align_up(body_size);
-
     // Decrypt data
-    std::vector<u8> payload(body_size);
+    std::vector<u8> payload(align_up(body_size));
 
-    dma_read(HW_KIRK_SRCADDR + data_offset + 0x90, payload.data(), body_size);
-    aes_decrypt(decrypt_key, payload.data(), body_size);
+    dma_read(HW_KIRK_SRCADDR + data_offset + 0x90, payload.data(), payload.size());
+    aes_decrypt(decrypt_key, payload.data(), payload.size());
     dma_write(HW_KIRK_DSTADDR, payload.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
@@ -759,12 +757,10 @@ static i32 command_decrypt_static() {
         return KirkResult::KIRK_RESULT_INVALID_DEC_KEYSEED;
     }
 
-    body_size = align_up(body_size);
+    std::vector<u8> buf(align_up(body_size));
 
-    std::vector<u8> buf(body_size);
-
-    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
-    aes_decrypt(AES_KEYSTORE[keyseed], buf.data(), body_size);
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), buf.size());
+    aes_decrypt(AES_KEYSTORE[keyseed], buf.data(), buf.size());
     dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
@@ -801,12 +797,10 @@ static i32 command_decrypt_perconsole() {
 
     get_individual_key(1, key);
 
-    body_size = align_up(body_size);
+    std::vector<u8> buf(align_up(body_size));
 
-    std::vector<u8> buf(body_size);
-
-    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), body_size);
-    aes_decrypt(key, buf.data(), body_size);
+    dma_read(HW_KIRK_SRCADDR + 0x14, buf.data(), buf.size());
+    aes_decrypt(key, buf.data(), buf.size());
     dma_write(HW_KIRK_DSTADDR, buf.data(), body_size);
 
     HW_KIRK_STATUS.needs_second_phase = false;
