@@ -2817,4 +2817,8 @@ u32 get_fb_addr() {
     return ctx.framebuffer.addr;
 }
 
+u32 get_fb_width() {
+    return ctx.framebuffer.width;
+}
+
 };

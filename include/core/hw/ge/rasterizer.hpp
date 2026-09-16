@@ -104,6 +104,7 @@ common::u32 get_base();
 common::u32 get_vertex_addr();
 common::u32 get_index_addr();
 common::u32 get_fb_addr();
+common::u32 get_fb_width();
 
 void draw_primitive(const common::u32 count, const common::u32 prim_type);
 void draw_bezier(const common::u32 u_count, const common::u32 v_count);
