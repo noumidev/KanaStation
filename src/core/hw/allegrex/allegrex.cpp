@@ -563,7 +563,10 @@ bool Allegrex::get_fpu_cond() const {
 
 u32 Allegrex::get_vfpu_control_reg(const u32 idx) {
     if (idx < Vfpu::NUM_REGS) {
-        return vfpu.matrixfile[idx].raw;
+        u32 data;
+
+        get_matrix_file_raw<Vfpu::MatrixType::Scalar>(idx, &data);
+        return data;
     } else {
         if ((idx >= 136) && (idx <= 143)) {
             const u32 prng_idx = idx - 136;
@@ -601,7 +604,7 @@ u32 Allegrex::get_vfpu_control_reg(const u32 idx) {
 
 void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
     if (idx < Vfpu::NUM_REGS) {
-        vfpu.matrixfile[idx].raw = data;
+        set_matrix_file_raw<Vfpu::MatrixType::Scalar>(idx, &data);
     } else {
         if ((idx >= 136) && (idx <= 143)) {
             const u32 prng_idx = idx - 136;
@@ -641,67 +644,6 @@ void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
             default:
                 logger->error("Unimplemented write to VFPU control register {} = {:08X}", idx, data);
                 exit(1);
-        }
-    }
-}
-
-void Allegrex::set_quad_vector(u32 idx, const f32 vec[4]) {
-    // It's supposedly possible to access higher indices, but I don't
-    // really want to implement this now
-    assert(idx < (Vfpu::NUM_REGS / 2));
-
-    const bool row_major = (idx & 63) >= 32;
-
-    idx &= 31;
-
-    for (int i = 0; i < 4; i++) {
-        if (row_major) {
-            vfpu.matrixfile[4 * idx + i].flt = vec[i];
-        } else {
-            vfpu.matrixfile[0x20 * i + idx].flt = vec[i];
-        }
-    }
-}
-
-void Allegrex::set_quad_vector_raw(u32 idx, const u32 vec[4]) {
-    // It's supposedly possible to access higher indices, but I don't
-    // really want to implement this now
-    assert(idx < (Vfpu::NUM_REGS / 2));
-
-    const bool row_major = (idx & 63) >= 32;
-
-    idx &= 31;
-
-    for (int i = 0; i < 4; i++) {
-        if (row_major) {
-            vfpu.matrixfile[4 * idx + i].raw = vec[i];
-        } else {
-            vfpu.matrixfile[0x20 * i + idx].raw = vec[i];
-        }
-    }
-}
-
-void Allegrex::set_quad_matrix(u32 idx, const f32 mtx[4][4]) {
-    assert(idx < Vfpu::NUM_REGS);
-
-    if (((idx & 3) != 0) || (idx >= 64)) {
-        logger->error("Invalid quad matrix index: {}", idx);
-        exit(1);
-    }
-
-    const bool row_major = idx >= 32;
-
-    idx &= 31;
-
-    for (int column = 0; column < 4; column++) {
-        for (int row = 0; row < 4; row++) {
-            int reg_idx = 0x20 * column + row + idx;
-            
-            if (row_major) {
-                vfpu.matrixfile[reg_idx].flt = mtx[column][row];
-            } else {
-                vfpu.matrixfile[reg_idx].flt = mtx[row][column];
-            }
         }
     }
 }

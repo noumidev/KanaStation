@@ -624,6 +624,12 @@ static i64 i_ll(Allegrex* cpu, const u32 instr) {
 
 // Also called LV.Q
 static i64 i_lqc2(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
+        return 1;
+    }
+
     const u32 vt = ((UIMM & 1) << 5) | RT;
     const u32 addr = cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3);
 
@@ -636,7 +642,7 @@ static i64 i_lqc2(Allegrex* cpu, const u32 instr) {
         cpu->read<u32>(addr + 3 * sizeof(u32))
     };
 
-    cpu->set_quad_vector_raw(vt, vec);
+    cpu->set_matrix_file_raw<Vfpu::MatrixType::QuadVector>(vt, vec);
     return 1;
 }
 
@@ -656,6 +662,21 @@ static i64 i_lwc1(Allegrex* cpu, const u32 instr) {
     }
 
     cpu->set_fgr_raw(RT, cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)UIMM));
+    return 1;
+}
+
+// LQ.S
+static i64 i_lwc2(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
+        return 1;
+    }
+
+    const u32 vt = ((UIMM & 3) << 5) | RT;
+    const u32 data = cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3));
+
+    cpu->set_matrix_file_raw<Vfpu::MatrixType::Scalar>(vt, &data);
     return 1;
 }
 
@@ -908,6 +929,31 @@ static i64 i_sltu(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+// Also called SV.Q
+static i64 i_sqc2(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
+        return 1;
+    }
+
+    const u32 vt = ((UIMM & 1) << 5) | RT;
+    const u32 addr = cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3);
+
+    assert((addr & 0xF) == 0);
+
+    u32 vec[4];
+
+    cpu->get_matrix_file_raw<Vfpu::MatrixType::QuadVector>(vt, vec);
+
+    // I need to confirm the memory layout of quadwords...
+    cpu->write<u32>(addr + 0 * sizeof(u32), vec[0]);
+    cpu->write<u32>(addr + 1 * sizeof(u32), vec[1]);
+    cpu->write<u32>(addr + 2 * sizeof(u32), vec[2]);
+    cpu->write<u32>(addr + 3 * sizeof(u32), vec[3]);
+    return 1;
+}
+
 static i64 i_sra(Allegrex* cpu, const u32 instr) {
     cpu->set_reg(RD, (i32)cpu->get_reg(RT) >> SA);
     return 1;
@@ -950,6 +996,24 @@ static i64 i_swc1(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+// SQ.S
+static i64 i_swc2(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
+        return 1;
+    }
+
+    const u32 vt = ((UIMM & 3) << 5) | RT;
+
+    u32 data;
+
+    cpu->get_matrix_file_raw<Vfpu::MatrixType::Scalar>(vt, &data);
+
+    cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3), data);
+    return 1;
+}
+
 static i64 i_swl(Allegrex* cpu, const u32 instr) {
     const u32 addr  = cpu->get_reg(RS) + (i32)(i16)UIMM;
     const u32 shift = 8 * (addr & 3);
@@ -981,15 +1045,37 @@ static i64 i_truncw(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_vmmulq(Allegrex* cpu, const u32 instr) {
+    f32 mtxt[16];
+    f32 mtxs[16];
+    f32 mtxd[16];
+
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VT, mtxt);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VS, mtxs);
+
+    for (int column = 0; column < 4; column++) {
+        for (int row = 0; row < 4; row++) {
+            f32 sum = 0;
+
+            for (int k = 0; k < 4; k++) {
+                sum += mtxs[4 * k + row] * mtxt[4 * column + k];
+            }
+
+            mtxd[4 * column + row] = sum;
+        }
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadMatrix>(VD, mtxd);
+    return 16;
+}
+
 static i64 i_vmzeroq(Allegrex* cpu, const u32 instr) {
-    constexpr f32 ZERO_MTX[4][4] = {
-        { 0, 0, 0, 0 },
-        { 0, 0, 0, 0 },
-        { 0, 0, 0, 0 },
-        { 0, 0, 0, 0 },
+    constexpr f32 ZERO_MTX[16] = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
     };
 
-    cpu->set_quad_matrix(VD, ZERO_MTX);
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadMatrix>(VD, ZERO_MTX);
     return 1;
 }
 
@@ -1220,7 +1306,7 @@ static i64 i_special3(Allegrex* cpu, const u32 instr) {
 static i64 i_vfpu(Allegrex* cpu, const u32 instr) {
     assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
 
-    if (!cpu->is_coprocessor_usable(2)) {
+    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
         return 1;
     }
 
@@ -1244,6 +1330,14 @@ static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
 
     // Not sure how to cleanly decode these instructions lmao
     switch (opcode) {
+        case 0:
+            switch (format) {
+                case 3:
+                    return i_vmmulq(cpu, instr);
+                default:
+                    cpu->get_logger()->warn("Unimplemented VMMUL format {} ({:08X}) @ {:08X}", format, instr, cpu->get_instr_addr());
+                    exit(1);
+            }
         case 7:
             switch (VT) {
                 case Vfpu6Opcode::VFPU6_OPCODE_VMZERO:
@@ -1292,7 +1386,7 @@ static i64 i_undefined_secondary(Allegrex* cpu, const u32 instr) {
     exit(1);
 }
 
-static i64 dummy(Allegrex* cpu, const u32) {
+static i64 i_dummy(Allegrex*, const u32) {
     return 1;
 }
 
@@ -1342,10 +1436,13 @@ void initialize() {
     primary_table[Opcode::OPCODE_CACHE   ] = i_cache;
     primary_table[Opcode::OPCODE_LL      ] = i_ll;
     primary_table[Opcode::OPCODE_LWC1    ] = i_lwc1;
+    primary_table[Opcode::OPCODE_LWC2    ] = i_lwc2;
     primary_table[Opcode::OPCODE_LQC2    ] = i_lqc2;
     primary_table[Opcode::OPCODE_SC      ] = i_sc;
     primary_table[Opcode::OPCODE_SWC1    ] = i_swc1;
+    primary_table[Opcode::OPCODE_SWC2    ] = i_swc2;
     primary_table[Opcode::OPCODE_VFPU6   ] = i_vfpu6;
+    primary_table[Opcode::OPCODE_SQC2    ] = i_sqc2;
     primary_table[Opcode::OPCODE_VFPU7   ] = i_vfpu7;
 
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLL    ] = i_sll;
@@ -1383,7 +1480,16 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU   ] = i_sltu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MAX    ] = i_max;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MIN    ] = i_min;
-    special_table[0x2E ] = dummy;
+
+    // Stubbed for convenience
+    primary_table[Opcode::OPCODE_VFPU0] = i_vfpu;
+    primary_table[Opcode::OPCODE_VFPU1] = i_vfpu;
+    primary_table[Opcode::OPCODE_VFPU3] = i_vfpu;
+    primary_table[Opcode::OPCODE_VFPU4] = i_vfpu;
+    primary_table[Opcode::OPCODE_VFPU5] = i_vfpu;
+
+    // What is this?
+    special_table[0x2E] = i_dummy;
 }
 
 void soft_reset() {

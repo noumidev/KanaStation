@@ -170,6 +170,16 @@ struct Fpu {
 struct Vfpu {
     static constexpr common::u64 NUM_REGS = 128;
 
+    enum class MatrixType {
+        Scalar,
+        PairVector,
+        TripleVector,
+        QuadVector,
+        PairMatrix,
+        TripleMatrix,
+        QuadMatrix,
+    };
+
     static constexpr common::u32 REVISION = 0;
 
     union {
@@ -343,9 +353,393 @@ public:
     common::u32 get_vfpu_control_reg(const common::u32 idx);
     void set_vfpu_control_reg(const common::u32 idx, const common::u32 data);
 
-    void set_quad_vector(common::u32 idx, const common::f32 vec[4]);
-    void set_quad_vector_raw(common::u32 idx, const common::u32 vec[4]);
-    void set_quad_matrix(common::u32 idx, const common::f32 mtx[4][4]);
+    template<Vfpu::MatrixType mtx_type>
+    void get_matrix_file(const common::u32 code, common::f32* data) {
+        const common::u32 matrix_bank = (code >> 2) & 7;
+
+        common::u32 idx;
+        common::u32 fsl;
+        common::u32 num_rows, num_columns;
+
+        bool is_row;
+
+        switch (mtx_type) {
+            case Vfpu::MatrixType::Scalar:
+                is_row = false;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 3;
+
+                num_rows    = 1;
+                num_columns = 1;
+                break;
+            case Vfpu::MatrixType::PairVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 2 : 1;
+                num_columns =  is_row ? 2 : 1;
+                break;
+            case Vfpu::MatrixType::TripleVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 6) & 1;
+
+                num_rows    = !is_row ? 3 : 1;
+                num_columns =  is_row ? 3 : 1;
+                break;
+            case Vfpu::MatrixType::QuadVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 4 : 1;
+                num_columns =  is_row ? 4 : 1;
+                break;
+            case Vfpu::MatrixType::PairMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 2;
+                num_columns = 2;
+                break;
+            case Vfpu::MatrixType::TripleMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 6) & 1;
+
+                num_rows    = 3;
+                num_columns = 3;
+                break;
+            case Vfpu::MatrixType::QuadMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 4;
+                num_columns = 4;
+                break;
+        }
+
+        common::u32 k = 0;
+
+        if (is_row) {
+            for (common::u32 i = 0; i < num_rows; i++) {
+                for (common::u32 j = 0; j < num_columns; j++) {
+                    data[k + j] = vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].flt;
+                }
+
+                k += 4;
+            }
+        } else {
+            for (common::u32 j = 0; j < num_columns; j++) {
+                for (common::u32 i = 0; i < num_rows; i++) {
+                    data[k + i] = vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].flt;
+                }
+
+                k += 4;
+            }
+        }
+    }
+
+    template<Vfpu::MatrixType mtx_type>
+    void get_matrix_file_raw(const common::u32 code, common::u32* data) {
+        const common::u32 matrix_bank = (code >> 2) & 7;
+
+        common::u32 idx;
+        common::u32 fsl;
+        common::u32 num_rows, num_columns;
+
+        bool is_row;
+
+        switch (mtx_type) {
+            case Vfpu::MatrixType::Scalar:
+                is_row = false;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 3;
+
+                num_rows    = 1;
+                num_columns = 1;
+                break;
+            case Vfpu::MatrixType::PairVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 2 : 1;
+                num_columns =  is_row ? 2 : 1;
+                break;
+            case Vfpu::MatrixType::TripleVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 6) & 1;
+
+                num_rows    = !is_row ? 3 : 1;
+                num_columns =  is_row ? 3 : 1;
+                break;
+            case Vfpu::MatrixType::QuadVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 4 : 1;
+                num_columns =  is_row ? 4 : 1;
+                break;
+            case Vfpu::MatrixType::PairMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 2;
+                num_columns = 2;
+                break;
+            case Vfpu::MatrixType::TripleMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 6) & 1;
+
+                num_rows    = 3;
+                num_columns = 3;
+                break;
+            case Vfpu::MatrixType::QuadMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 4;
+                num_columns = 4;
+                break;
+        }
+
+        common::u32 k = 0;
+
+        if (is_row) {
+            for (common::u32 i = 0; i < num_rows; i++) {
+                for (common::u32 j = 0; j < num_columns; j++) {
+                    data[k + j] = vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].raw;
+                }
+
+                k += 4;
+            }
+        } else {
+            for (common::u32 j = 0; j < num_columns; j++) {
+                for (common::u32 i = 0; i < num_rows; i++) {
+                    data[k + i] = vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].raw;
+                }
+
+                k += 4;
+            }
+        }
+    }
+
+    template<Vfpu::MatrixType mtx_type>
+    void set_matrix_file(const common::u32 code, const common::f32* data) {
+        const common::u32 matrix_bank = (code >> 2) & 7;
+
+        common::u32 idx;
+        common::u32 fsl;
+        common::u32 num_rows, num_columns;
+
+        bool is_row;
+
+        switch (mtx_type) {
+            case Vfpu::MatrixType::Scalar:
+                is_row = false;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 3;
+
+                num_rows    = 1;
+                num_columns = 1;
+                break;
+            case Vfpu::MatrixType::PairVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 2 : 1;
+                num_columns =  is_row ? 2 : 1;
+                break;
+            case Vfpu::MatrixType::TripleVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 6) & 1;
+
+                num_rows    = !is_row ? 3 : 1;
+                num_columns =  is_row ? 3 : 1;
+                break;
+            case Vfpu::MatrixType::QuadVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 4 : 1;
+                num_columns =  is_row ? 4 : 1;
+                break;
+            case Vfpu::MatrixType::PairMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 2;
+                num_columns = 2;
+                break;
+            case Vfpu::MatrixType::TripleMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 6) & 1;
+
+                num_rows    = 3;
+                num_columns = 3;
+                break;
+            case Vfpu::MatrixType::QuadMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 4;
+                num_columns = 4;
+                break;
+        }
+
+        common::u32 k = 0;
+
+        if (is_row) {
+            for (common::u32 i = 0; i < num_rows; i++) {
+                for (common::u32 j = 0; j < num_columns; j++) {
+                    vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].flt = data[k + j];
+                }
+
+                k += 4;
+            }
+        } else {
+            for (common::u32 j = 0; j < num_columns; j++) {
+                for (common::u32 i = 0; i < num_rows; i++) {
+                    vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].flt = data[k + i];
+                }
+
+                k += 4;
+            }
+        }
+    }
+
+    template<Vfpu::MatrixType mtx_type>
+    void set_matrix_file_raw(const common::u32 code, const common::u32* data) {
+        const common::u32 matrix_bank = (code >> 2) & 7;
+
+        common::u32 idx;
+        common::u32 fsl;
+        common::u32 num_rows, num_columns;
+
+        bool is_row;
+
+        switch (mtx_type) {
+            case Vfpu::MatrixType::Scalar:
+                is_row = false;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 3;
+
+                num_rows    = 1;
+                num_columns = 1;
+                break;
+            case Vfpu::MatrixType::PairVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 2 : 1;
+                num_columns =  is_row ? 2 : 1;
+                break;
+            case Vfpu::MatrixType::TripleVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 6) & 1;
+
+                num_rows    = !is_row ? 3 : 1;
+                num_columns =  is_row ? 3 : 1;
+                break;
+            case Vfpu::MatrixType::QuadVector:
+                is_row = ((code >> 5) & 1) != 0;
+
+                idx = (code >> 0) & 3;
+                fsl = (code >> 5) & 2;
+
+                num_rows    = !is_row ? 4 : 1;
+                num_columns =  is_row ? 4 : 1;
+                break;
+            case Vfpu::MatrixType::PairMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 2;
+                num_columns = 2;
+                break;
+            case Vfpu::MatrixType::TripleMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 6) & 1;
+
+                num_rows    = 3;
+                num_columns = 3;
+                break;
+            case Vfpu::MatrixType::QuadMatrix:
+                is_row = ((code >> 5) & 1) == 0;
+
+                fsl = (code >> 0) & 3;
+                idx = (code >> 5) & 2;
+
+                num_rows    = 4;
+                num_columns = 4;
+                break;
+        }
+
+        common::u32 k = 0;
+
+        if (is_row) {
+            for (common::u32 i = 0; i < num_rows; i++) {
+                for (common::u32 j = 0; j < num_columns; j++) {
+                    vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].raw = data[k + j];
+                }
+
+                k += 4;
+            }
+        } else {
+            for (common::u32 j = 0; j < num_columns; j++) {
+                for (common::u32 i = 0; i < num_rows; i++) {
+                    vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].raw = data[k + i];
+                }
+
+                k += 4;
+            }
+        }
+    }
 
     template<typename T>
     T read(const common::u32 addr);
