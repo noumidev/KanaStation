@@ -335,6 +335,11 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_CONNSTAT:
             logger->debug("CONNSTAT write32 = {:08X}", data);
             break;
+        case IoAddress::IO_ADDRESS_PLLMULT:
+            logger->debug("PLLMULT write32 = {:08X}", data);
+
+            HW_SYSCTRL_PLLMULT = data;
+            break;
         case SYSCTRL_ADDR + 0x03C:
         case SYSCTRL_ADDR + 0x06C:
         case SYSCTRL_ADDR + 0x074:
