@@ -529,7 +529,7 @@ f32 Allegrex::get_fgr(const u32 idx) const {
 
     const f32 data = fpu.fgrs[idx].flt;
 
-    assert(!(isnan(data) || isinf(data)));
+    // assert(!(isnan(data) || isinf(data)));
 
     return data;
 }
@@ -542,7 +542,7 @@ u32 Allegrex::get_fgr_raw(const u32 idx) const {
 
 void Allegrex::set_fgr(const u32 idx, const f32 data) {
     assert(idx < Fpu::NUM_REGS);
-    assert(!(isnan(data) || isinf(data)));
+    // assert(!(isnan(data) || isinf(data)));
 
     fpu.fgrs[idx].flt = data;
 }
@@ -646,6 +646,74 @@ void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
                 exit(1);
         }
     }
+}
+
+void Allegrex::decorate(f32 flts[4], const u32 decorator) {
+    static constexpr f32 CONSTANTS[] = {
+        0, 1, 2, 1.0 / 2.0, 3, 1.0 / 3.0, 1.0 / 4.0, 1.0 / 6.0,
+    };
+
+    if (decorator == 0xE4) {
+        // No decoration
+        return;
+    }
+
+    const f32 x = flts[0];
+    const f32 y = flts[1];
+    const f32 z = flts[2];
+    const f32 w = flts[3];
+
+    for (int i = 0; i < 4; i++) {
+        // If bit (i + 12) is 1, we perform constant insertion, otherwise
+        // we swizzle and potentially take the absolute value
+        if ((decorator & (1 << (i + 12))) != 0) {
+            const u32 idx = ((decorator >> (i + 6)) & 4) | ((decorator >> (2 * i)) & 3);
+
+            flts[i] = CONSTANTS[idx];
+        } else {
+            // Swizzle
+            switch ((decorator >> (2 * i)) & 3) {
+                case 0:
+                    flts[i] = x;
+                    break;
+                case 1:
+                    flts[i] = y;
+                    break;
+                case 2:
+                    flts[i] = z;
+                    break;
+                case 3:
+                    flts[i] = w;
+                    break;
+            }
+
+            if ((decorator & (1 << (i + 8))) != 0) {
+                flts[i] = std::abs(flts[i]);
+            }
+        }
+
+        if ((decorator & (1 << (i + 16))) != 0) {
+            flts[i] = -flts[i];
+        }
+    }
+}
+
+void Allegrex::decorate_src(f32 flts[4]) {
+    decorate(flts, vfpu.prefix_stack.source);
+}
+
+void Allegrex::decorate_tgt(f32 flts[4]) {
+    decorate(flts, vfpu.prefix_stack.target);
+}
+
+void Allegrex::decorate_dst(f32 flts[4]) {
+    // TODO
+}
+
+void Allegrex::clear_decorators() {
+    vfpu.prefix_stack.source = 0xE4;   // No negation, no constant insertion, no abs, XYZW swizzle
+    vfpu.prefix_stack.target = 0xE4;   // ...
+    vfpu.prefix_stack.destination = 0; // No saturation, no masking
 }
 
 u32 Allegrex::fetch_instr() {

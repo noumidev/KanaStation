@@ -235,6 +235,8 @@ private:
 
     common::u32 event_id;
 
+    void decorate(common::f32 flts[4], const common::u32 decorator);
+
 public:
     Allegrex(const CpuId cpu_id);
     ~Allegrex();
@@ -352,6 +354,11 @@ public:
     // VFPU handlers
     common::u32 get_vfpu_control_reg(const common::u32 idx);
     void set_vfpu_control_reg(const common::u32 idx, const common::u32 data);
+
+    void decorate_src(common::f32 flts[4]);
+    void decorate_tgt(common::f32 flts[4]);
+    void decorate_dst(common::f32 flts[4]);
+    void clear_decorators();
 
     template<Vfpu::MatrixType mtx_type>
     void get_matrix_file(const common::u32 code, common::f32* data) {
