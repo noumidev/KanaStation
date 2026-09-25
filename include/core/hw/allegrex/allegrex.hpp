@@ -182,10 +182,7 @@ struct Vfpu {
 
     static constexpr common::u32 REVISION = 0;
 
-    union {
-        common::u32 raw;
-        common::f32 flt;
-    } matrixfile[NUM_REGS];
+    common::VfpuFloat matrixfile[NUM_REGS];
 
     struct {
         common::u32 source, target, destination;
@@ -235,7 +232,7 @@ private:
 
     common::u32 event_id;
 
-    void decorate(common::f32 flts[4], const common::u32 decorator);
+    void decorate(common::Vec4& vec, const common::u32 decorator);
 
 public:
     Allegrex(const CpuId cpu_id);
@@ -355,13 +352,15 @@ public:
     common::u32 get_vfpu_control_reg(const common::u32 idx);
     void set_vfpu_control_reg(const common::u32 idx, const common::u32 data);
 
-    void decorate_src(common::f32 flts[4]);
-    void decorate_tgt(common::f32 flts[4]);
-    void decorate_dst(common::f32 flts[4]);
+    bool get_vfpu_cond(const common::u32 idx) const;
+
+    void decorate_src(common::Vec4& vec);
+    void decorate_tgt(common::Vec4& vec);
+    void decorate_dst(common::Vec4& vec);
     void clear_decorators();
 
     template<Vfpu::MatrixType mtx_type>
-    void get_matrix_file(const common::u32 code, common::f32* data) {
+    void get_matrix_file(const common::u32 code, common::VfpuFloat* flts) {
         const common::u32 matrix_bank = (code >> 2) & 7;
 
         common::u32 idx;
@@ -441,7 +440,7 @@ public:
         if (is_row) {
             for (common::u32 i = 0; i < num_rows; i++) {
                 for (common::u32 j = 0; j < num_columns; j++) {
-                    data[k + j] = vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].flt;
+                    flts[k + j] = vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)];
                 }
 
                 k += 4;
@@ -449,7 +448,7 @@ public:
         } else {
             for (common::u32 j = 0; j < num_columns; j++) {
                 for (common::u32 i = 0; i < num_rows; i++) {
-                    data[k + i] = vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].flt;
+                    flts[k + i] = vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)];
                 }
 
                 k += 4;
@@ -458,7 +457,7 @@ public:
     }
 
     template<Vfpu::MatrixType mtx_type>
-    void get_matrix_file_raw(const common::u32 code, common::u32* data) {
+    void set_matrix_file(const common::u32 code, const common::VfpuFloat* flts, const bool* write_mask = nullptr) {
         const common::u32 matrix_bank = (code >> 2) & 7;
 
         common::u32 idx;
@@ -538,7 +537,9 @@ public:
         if (is_row) {
             for (common::u32 i = 0; i < num_rows; i++) {
                 for (common::u32 j = 0; j < num_columns; j++) {
-                    data[k + j] = vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].raw;
+                    if ((write_mask == nullptr) || (!write_mask[k + j])) {
+                        vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)] = flts[k + j];
+                    }
                 }
 
                 k += 4;
@@ -546,201 +547,9 @@ public:
         } else {
             for (common::u32 j = 0; j < num_columns; j++) {
                 for (common::u32 i = 0; i < num_rows; i++) {
-                    data[k + i] = vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].raw;
-                }
-
-                k += 4;
-            }
-        }
-    }
-
-    template<Vfpu::MatrixType mtx_type>
-    void set_matrix_file(const common::u32 code, const common::f32* data) {
-        const common::u32 matrix_bank = (code >> 2) & 7;
-
-        common::u32 idx;
-        common::u32 fsl;
-        common::u32 num_rows, num_columns;
-
-        bool is_row;
-
-        switch (mtx_type) {
-            case Vfpu::MatrixType::Scalar:
-                is_row = false;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 3;
-
-                num_rows    = 1;
-                num_columns = 1;
-                break;
-            case Vfpu::MatrixType::PairVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 2;
-
-                num_rows    = !is_row ? 2 : 1;
-                num_columns =  is_row ? 2 : 1;
-                break;
-            case Vfpu::MatrixType::TripleVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 6) & 1;
-
-                num_rows    = !is_row ? 3 : 1;
-                num_columns =  is_row ? 3 : 1;
-                break;
-            case Vfpu::MatrixType::QuadVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 2;
-
-                num_rows    = !is_row ? 4 : 1;
-                num_columns =  is_row ? 4 : 1;
-                break;
-            case Vfpu::MatrixType::PairMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 5) & 2;
-
-                num_rows    = 2;
-                num_columns = 2;
-                break;
-            case Vfpu::MatrixType::TripleMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 6) & 1;
-
-                num_rows    = 3;
-                num_columns = 3;
-                break;
-            case Vfpu::MatrixType::QuadMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 5) & 2;
-
-                num_rows    = 4;
-                num_columns = 4;
-                break;
-        }
-
-        common::u32 k = 0;
-
-        if (is_row) {
-            for (common::u32 i = 0; i < num_rows; i++) {
-                for (common::u32 j = 0; j < num_columns; j++) {
-                    vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].flt = data[k + j];
-                }
-
-                k += 4;
-            }
-        } else {
-            for (common::u32 j = 0; j < num_columns; j++) {
-                for (common::u32 i = 0; i < num_rows; i++) {
-                    vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].flt = data[k + i];
-                }
-
-                k += 4;
-            }
-        }
-    }
-
-    template<Vfpu::MatrixType mtx_type>
-    void set_matrix_file_raw(const common::u32 code, const common::u32* data) {
-        const common::u32 matrix_bank = (code >> 2) & 7;
-
-        common::u32 idx;
-        common::u32 fsl;
-        common::u32 num_rows, num_columns;
-
-        bool is_row;
-
-        switch (mtx_type) {
-            case Vfpu::MatrixType::Scalar:
-                is_row = false;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 3;
-
-                num_rows    = 1;
-                num_columns = 1;
-                break;
-            case Vfpu::MatrixType::PairVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 2;
-
-                num_rows    = !is_row ? 2 : 1;
-                num_columns =  is_row ? 2 : 1;
-                break;
-            case Vfpu::MatrixType::TripleVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 6) & 1;
-
-                num_rows    = !is_row ? 3 : 1;
-                num_columns =  is_row ? 3 : 1;
-                break;
-            case Vfpu::MatrixType::QuadVector:
-                is_row = ((code >> 5) & 1) != 0;
-
-                idx = (code >> 0) & 3;
-                fsl = (code >> 5) & 2;
-
-                num_rows    = !is_row ? 4 : 1;
-                num_columns =  is_row ? 4 : 1;
-                break;
-            case Vfpu::MatrixType::PairMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 5) & 2;
-
-                num_rows    = 2;
-                num_columns = 2;
-                break;
-            case Vfpu::MatrixType::TripleMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 6) & 1;
-
-                num_rows    = 3;
-                num_columns = 3;
-                break;
-            case Vfpu::MatrixType::QuadMatrix:
-                is_row = ((code >> 5) & 1) == 0;
-
-                fsl = (code >> 0) & 3;
-                idx = (code >> 5) & 2;
-
-                num_rows    = 4;
-                num_columns = 4;
-                break;
-        }
-
-        common::u32 k = 0;
-
-        if (is_row) {
-            for (common::u32 i = 0; i < num_rows; i++) {
-                for (common::u32 j = 0; j < num_columns; j++) {
-                    vfpu.matrixfile[4 * matrix_bank + ((fsl + j) & 3) + 32 * ((idx + i) & 3)].raw = data[k + j];
-                }
-
-                k += 4;
-            }
-        } else {
-            for (common::u32 j = 0; j < num_columns; j++) {
-                for (common::u32 i = 0; i < num_rows; i++) {
-                    vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)].raw = data[k + i];
+                    if ((write_mask == nullptr) || (!write_mask[k + j])) {
+                        vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)] = flts[k + i];
+                    }
                 }
 
                 k += 4;

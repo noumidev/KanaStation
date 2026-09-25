@@ -25,6 +25,19 @@ using i64 = std::int64_t;
 using f32 = float;
 using f64 = double;
 
+union VfpuFloat {
+    f32 flt;
+    u32 raw;
+};
+
+struct Vec4 {
+    VfpuFloat e[4];
+
+    bool write_mask[4];
+};
+
+using Mat4 = VfpuFloat[16];
+
 template<typename T>
 inline T byteswap(const T data);
 

@@ -563,10 +563,10 @@ bool Allegrex::get_fpu_cond() const {
 
 u32 Allegrex::get_vfpu_control_reg(const u32 idx) {
     if (idx < Vfpu::NUM_REGS) {
-        u32 data;
+        VfpuFloat flt;
 
-        get_matrix_file_raw<Vfpu::MatrixType::Scalar>(idx, &data);
-        return data;
+        get_matrix_file<Vfpu::MatrixType::Scalar>(idx, &flt);
+        return flt.raw;
     } else {
         if ((idx >= 136) && (idx <= 143)) {
             const u32 prng_idx = idx - 136;
@@ -604,7 +604,9 @@ u32 Allegrex::get_vfpu_control_reg(const u32 idx) {
 
 void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
     if (idx < Vfpu::NUM_REGS) {
-        set_matrix_file_raw<Vfpu::MatrixType::Scalar>(idx, &data);
+        const VfpuFloat flt { .raw = data };
+
+        set_matrix_file<Vfpu::MatrixType::Scalar>(idx, &flt);
     } else {
         if ((idx >= 136) && (idx <= 143)) {
             const u32 prng_idx = idx - 136;
@@ -648,7 +650,13 @@ void Allegrex::set_vfpu_control_reg(const u32 idx, const u32 data) {
     }
 }
 
-void Allegrex::decorate(f32 flts[4], const u32 decorator) {
+bool Allegrex::get_vfpu_cond(const u32 idx) const {
+    assert(idx < 6);
+
+    return (vfpu.cond & (1 << idx)) != 0;
+}
+
+void Allegrex::decorate(Vec4& vec, const u32 decorator) {
     static constexpr f32 CONSTANTS[] = {
         0, 1, 2, 1.0 / 2.0, 3, 1.0 / 3.0, 1.0 / 4.0, 1.0 / 6.0,
     };
@@ -658,10 +666,10 @@ void Allegrex::decorate(f32 flts[4], const u32 decorator) {
         return;
     }
 
-    const f32 x = flts[0];
-    const f32 y = flts[1];
-    const f32 z = flts[2];
-    const f32 w = flts[3];
+    const auto x = vec.e[0];
+    const auto y = vec.e[1];
+    const auto z = vec.e[2];
+    const auto w = vec.e[3];
 
     for (int i = 0; i < 4; i++) {
         // If bit (i + 12) is 1, we perform constant insertion, otherwise
@@ -669,45 +677,73 @@ void Allegrex::decorate(f32 flts[4], const u32 decorator) {
         if ((decorator & (1 << (i + 12))) != 0) {
             const u32 idx = ((decorator >> (i + 6)) & 4) | ((decorator >> (2 * i)) & 3);
 
-            flts[i] = CONSTANTS[idx];
+            vec.e[i].flt = CONSTANTS[idx];
         } else {
             // Swizzle
             switch ((decorator >> (2 * i)) & 3) {
                 case 0:
-                    flts[i] = x;
+                    vec.e[i] = x;
                     break;
                 case 1:
-                    flts[i] = y;
+                    vec.e[i] = y;
                     break;
                 case 2:
-                    flts[i] = z;
+                    vec.e[i] = z;
                     break;
                 case 3:
-                    flts[i] = w;
+                    vec.e[i] = w;
                     break;
             }
 
             if ((decorator & (1 << (i + 8))) != 0) {
-                flts[i] = std::abs(flts[i]);
+                vec.e[i].flt = std::abs(vec.e[i].flt);
             }
         }
 
         if ((decorator & (1 << (i + 16))) != 0) {
-            flts[i] = -flts[i];
+            vec.e[i].flt = -vec.e[i].flt;
         }
     }
 }
 
-void Allegrex::decorate_src(f32 flts[4]) {
-    decorate(flts, vfpu.prefix_stack.source);
+void Allegrex::decorate_src(Vec4 &vec) {
+    decorate(vec, vfpu.prefix_stack.source);
 }
 
-void Allegrex::decorate_tgt(f32 flts[4]) {
-    decorate(flts, vfpu.prefix_stack.target);
+void Allegrex::decorate_tgt(Vec4 &vec) {
+    decorate(vec, vfpu.prefix_stack.target);
 }
 
-void Allegrex::decorate_dst(f32 flts[4]) {
-    // TODO
+static inline f32 clamp(const f32 n, const f32 x, const f32 y) {
+    if (n < x) {
+        return x;
+    } else if (n > y) {
+        return y;
+    }
+
+    return n;
+}
+
+void Allegrex::decorate_dst(Vec4 &vec) {
+    const u32 decorator = vfpu.prefix_stack.destination;
+
+    for (int i = 0; i < 4; i++) {
+        switch ((decorator >> (2 * i)) & 3) {
+            case 0:
+                break;
+            case 1:
+                vec.e[i].flt = clamp(vec.e[i].flt, 0.0, 1.0);
+                break;
+            case 2:
+                logger->error("Invalid saturation setting");
+                exit(1);
+            case 3:
+                vec.e[i].flt = clamp(vec.e[i].flt, -1.0, 1.0);
+                break;
+        }
+
+        vec.write_mask[i] = (decorator & (1 << (i + 8))) != 0;
+    }
 }
 
 void Allegrex::clear_decorators() {
