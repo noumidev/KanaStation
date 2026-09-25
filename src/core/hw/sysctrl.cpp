@@ -232,7 +232,7 @@ static void write_reset_enable(u32 data) {
 }
 
 static void assert_rpc_interrupt(const int) {
-    intc::assert_sc_interrupt(31);
+    intc::assert_me_interrupt(31);
 }
 
 static void write(const u32 addr, const u32 data) {
