@@ -11,6 +11,7 @@
 #include <array>
 #include <bit>
 #include <cstdlib>
+#include <random>
 
 #include <common/types.hpp>
 
@@ -193,7 +194,9 @@ enum FpuOpcode {
     FPU_OPCODE_ABS    = 0x05,
     FPU_OPCODE_MOV    = 0x06,
     FPU_OPCODE_NEG    = 0x07,
+    FPU_OPCODE_ROUNDW = 0x0C,
     FPU_OPCODE_TRUNCW = 0x0D,
+    FPU_OPCODE_CEILW  = 0x0E,
     FPU_OPCODE_CVTS   = 0x20,
     FPU_OPCODE_C      = 0x30,
 };
@@ -249,6 +252,9 @@ static i64 i_bcf(Allegrex* cpu, const u32 instr) {
         case CopNum::COP_NUM_FPU:
             cond = cpu->get_fpu_cond();
             break;
+        case CopNum::COP_NUM_VFPU:
+            cond = cpu->get_vfpu_cond(VT >> 2);
+            break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for BCF", cop_num);
             exit(1);
@@ -265,6 +271,9 @@ static i64 i_bcfl(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
         case CopNum::COP_NUM_FPU:
             cond = cpu->get_fpu_cond();
+            break;
+        case CopNum::COP_NUM_VFPU:
+            cond = cpu->get_vfpu_cond(VT >> 2);
             break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for BCFL", cop_num);
@@ -283,6 +292,9 @@ static i64 i_bct(Allegrex* cpu, const u32 instr) {
         case CopNum::COP_NUM_FPU:
             cond = cpu->get_fpu_cond();
             break;
+        case CopNum::COP_NUM_VFPU:
+            cond = cpu->get_vfpu_cond(VT >> 2);
+            break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for BCT", cop_num);
             exit(1);
@@ -299,6 +311,9 @@ static i64 i_bctl(Allegrex* cpu, const u32 instr) {
     switch (cop_num) {
         case CopNum::COP_NUM_FPU:
             cond = cpu->get_fpu_cond();
+            break;
+        case CopNum::COP_NUM_VFPU:
+            cond = cpu->get_vfpu_cond(VT >> 2);
             break;
         default:
             cpu->get_logger()->error("Unimplemented CP{} for BCTL", cop_num);
@@ -400,6 +415,11 @@ static i64 i_break(Allegrex* cpu, const u32) {
     cpu->dump_state();
     cpu->get_logger()->info(" IA: {:08X}", cpu->get_instr_addr());
     exit(1);
+}
+
+static i64 i_ceilw(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr_raw(FD, (i32)std::ceilf(cpu->get_fgr(FS)));
+    return 1;
 }
 
 template<int cop_num>
@@ -635,14 +655,13 @@ static i64 i_lqc2(Allegrex* cpu, const u32 instr) {
 
     assert((addr & 0xF) == 0);
 
-    const u32 vec[4] = {
-        cpu->read<u32>(addr + 0 * sizeof(u32)),
-        cpu->read<u32>(addr + 1 * sizeof(u32)),
-        cpu->read<u32>(addr + 2 * sizeof(u32)),
-        cpu->read<u32>(addr + 3 * sizeof(u32))
-    };
+    Vec4 vec;
 
-    cpu->set_matrix_file_raw<Vfpu::MatrixType::QuadVector>(vt, vec);
+    for (int i = 0; i < 4; i++) {
+        vec.e[i].raw = cpu->read<u32>(addr + i * sizeof(u32));
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadVector>(vt, vec.e);
     return 1;
 }
 
@@ -674,9 +693,9 @@ static i64 i_lwc2(Allegrex* cpu, const u32 instr) {
     }
 
     const u32 vt = ((UIMM & 3) << 5) | RT;
-    const u32 data = cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3));
+    const VfpuFloat flt { .raw = cpu->read<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3)) };
 
-    cpu->set_matrix_file_raw<Vfpu::MatrixType::Scalar>(vt, &data);
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(vt, &flt);
     return 1;
 }
 
@@ -867,6 +886,11 @@ static i64 i_rotrv(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_roundw(Allegrex* cpu, const u32 instr) {
+    cpu->set_fgr_raw(FD, (i32)std::roundf(cpu->get_fgr(FS)));
+    return 1;
+}
+
 static i64 i_sb(Allegrex* cpu, const u32 instr) {
     cpu->write<u8>(cpu->get_reg(RS) + (i32)(i16)UIMM, (u8)cpu->get_reg(RT));
     return 1;
@@ -942,15 +966,13 @@ static i64 i_sqc2(Allegrex* cpu, const u32 instr) {
 
     assert((addr & 0xF) == 0);
 
-    u32 vec[4];
+    Vec4 vec;
 
-    cpu->get_matrix_file_raw<Vfpu::MatrixType::QuadVector>(vt, vec);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(vt, vec.e);
 
-    // I need to confirm the memory layout of quadwords...
-    cpu->write<u32>(addr + 0 * sizeof(u32), vec[0]);
-    cpu->write<u32>(addr + 1 * sizeof(u32), vec[1]);
-    cpu->write<u32>(addr + 2 * sizeof(u32), vec[2]);
-    cpu->write<u32>(addr + 3 * sizeof(u32), vec[3]);
+    for (int i = 0; i < 4; i++) {
+        cpu->write<u32>(addr + i * sizeof(u32), vec.e[i].raw);
+    }
     return 1;
 }
 
@@ -1006,11 +1028,10 @@ static i64 i_swc2(Allegrex* cpu, const u32 instr) {
 
     const u32 vt = ((UIMM & 3) << 5) | RT;
 
-    u32 data;
+    VfpuFloat flt;
 
-    cpu->get_matrix_file_raw<Vfpu::MatrixType::Scalar>(vt, &data);
-
-    cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3), data);
+    cpu->get_matrix_file<Vfpu::MatrixType::Scalar>(vt, &flt);
+    cpu->write<u32>(cpu->get_reg(RS) + (i32)(i16)(UIMM & ~3), flt.raw);
     return 1;
 }
 
@@ -1041,27 +1062,560 @@ static i64 i_syscall(Allegrex* cpu, const u32 instr) {
 }
 
 static i64 i_truncw(Allegrex* cpu, const u32 instr) {
-    cpu->set_fgr_raw(FD, (u32)std::truncf(cpu->get_fgr(FS)));
+    cpu->set_fgr_raw(FD, (i32)std::truncf(cpu->get_fgr(FS)));
     return 1;
 }
 
-static i64 i_vmmulq(Allegrex* cpu, const u32 instr) {
-    f32 mtxt[16];
-    f32 mtxs[16];
-    f32 mtxd[16];
+template<Vfpu::MatrixType type>
+static constexpr inline i64 get_element_count() {
+    // The return value is not really meaningful for matrix ops, but
+    // I can use it to calculate instruction cycles
+    switch (type) {
+        case Vfpu::MatrixType::Scalar:
+            return 1;
+        case Vfpu::MatrixType::PairVector:
+        case Vfpu::MatrixType::PairMatrix:
+            return 2;
+        case Vfpu::MatrixType::TripleVector:
+        case Vfpu::MatrixType::TripleMatrix:
+            return 3;
+        case Vfpu::MatrixType::QuadVector:
+        case Vfpu::MatrixType::QuadMatrix:
+            return 4;
+        default:
+            assert(false);
+    }
+}
 
-    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VT, mtxt);
+template<Vfpu::MatrixType type>
+static i64 i_vabs(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::abs(vs.e[i].flt);
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vadd(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt + vt.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vasin(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::asinf(vs.e[i].flt) / M_PI_2;
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vcmovt(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VD, vt.e);
+    cpu->decorate_src(vs);
+
+    const u32 imm3 = (VT >> 1) & 7;
+
+    assert(imm3 != 7);
+
+    const u32 cc = cpu->get_vfpu_control_reg(131);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vt.e[i].flt;
+
+        if (imm3 < 6) {
+            if ((cc & (1 << imm3)) != 0) {
+                vd.e[i].flt = vs.e[i].flt;
+            }
+        } else if ((cc & (1 << i)) != 0) {
+            vd.e[i].flt = vs.e[i].flt;
+        }
+    }
+
+    cpu->set_matrix_file<type>(VD, vd.e);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vcmp(Allegrex* cpu, const u32 instr) {
+    Vec4 vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    const u32 cond_code = instr & 0xF;
+
+    u32 cc = 0;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        bool cond;
+
+        switch (cond_code) {
+            case 0:
+                cond = false;
+                break;
+            case 1:
+                cond = vs.e[i].flt == vt.e[i].flt;
+                break;
+            case 2:
+                cond = vs.e[i].flt < vt.e[i].flt;
+                break;
+            case 3:
+                cond = vs.e[i].flt <= vt.e[i].flt;
+                break;
+            case 4:
+                cond = true;
+                break;
+            case 5:
+                cond = vs.e[i].flt != vt.e[i].flt;
+                break;
+            case 6:
+                cond = vs.e[i].flt >= vt.e[i].flt;
+                break;
+            case 7:
+                cond = vs.e[i].flt > vt.e[i].flt;
+                break;
+            case 8:
+                cond = vs.e[i].flt == 0.0;
+                break;
+            case 9:
+                cond = std::isnan(vs.e[i].flt);
+                break;
+            case 10:
+                cond = std::isinf(std::abs(vs.e[i].flt));
+                break;
+            case 11:
+                cond = std::isnan(vs.e[i].flt) || std::isinf(vs.e[i].flt);
+                break;
+            case 12:
+                cond = vs.e[i].flt != 0.0;
+                break;
+            case 13:
+                cond = !std::isnan(vs.e[i].flt);
+                break;
+            case 14:
+                cond = !std::isinf(std::abs(vs.e[i].flt));
+                break;
+            case 15:
+                cond = !std::isnan(vs.e[i].flt) && !std::isinf(vs.e[i].flt);
+                break;
+        }
+
+        if (cond) {
+            cc |= 1 << i;
+
+            // If the comparison "passed", also update the OR bit
+            if (i == 0) {
+                // Initially, the AND bit is also set
+                cc |= 0x30;
+            } else {
+                cc |= 0x10;
+            }
+        } else if (i != 0) {
+            // Clear the AND bit if the comparison "failed"
+            cc &= ~0x20;
+        }
+    }
+
+    cpu->set_vfpu_control_reg(131, cc);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vcos(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::cosf(M_PI_2 * vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+static i64 i_vcrspt(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleVector>(VS, vs.e);
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleVector>(VT, vt.e);
+
+    vd.e[0].flt = vs.e[1].flt * vt.e[2].flt - vs.e[2].flt * vt.e[1].flt;
+    vd.e[1].flt = vs.e[2].flt * vt.e[0].flt - vs.e[0].flt * vt.e[2].flt;
+    vd.e[2].flt = vs.e[0].flt * vt.e[1].flt - vs.e[1].flt * vt.e[0].flt;
+
+    cpu->set_matrix_file<Vfpu::MatrixType::TripleVector>(VD, vd.e);
+    return 9;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vcst(Allegrex* cpu, const u32 instr) {
+    static const f32 CONSTANTS[] = {
+        from_u32(0x7F7FFFFF),
+        M_SQRT2, M_SQRT1_2, M_2_SQRTPI,
+        M_2_PI, M_1_PI, M_PI_4, M_PI_2, M_PI,
+        M_E, M_LOG2E, M_LOG10E, M_LN2, M_LN10,
+        2.0 * M_PI, M_PI / 6.0,  std::log10f(2), std::log2f(10), std::sqrtf(3) / 2.0F
+    };
+
+    Vec4 vd;
+
+    const u32 imm5 = VT & 31;
+
+    assert((imm5 != 0) && (imm5 <= 19));
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = CONSTANTS[imm5 - 1];
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vdiv(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+        cpu->decorate_tgt(vt);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt / vt.e[i].flt;
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 14 * get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vdot(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    vd.e[0].flt = 0;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[0].flt += vs.e[i].flt * vt.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VD, vd.e, vd.write_mask);
+    return 7;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vexp2(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::exp2f(vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vf2iz(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    const u32 imm5 = VT & 31;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::truncf(vs.e[i].flt * (1 << imm5));
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+static i64 i_vfims(Allegrex* cpu, const u32 instr) {
+    Vec4 vd;
+
+    // Build f32 from f16
+    u32 flt = (UIMM & 0x8000) << 16;
+
+    const u32 exponent = (UIMM >> 10) & 31;
+    const u32 mantissa = (UIMM >>  0) & 0x3FF;
+
+    if (exponent == 0) {
+        // This is either 0 or a denormal, which is flushed to 0 on the PSP?
+    } else if (exponent == 0x1F) {
+        // Infinity or NaN
+        flt |= 0xFF << 23;
+        flt |= mantissa << 13;
+    } else {
+        flt |= (exponent + 127 - 15) << 23;
+        flt |= mantissa << 13;
+    }
+
+    vd.e[0].flt = from_u32(flt);
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VT, vd.e, vd.write_mask);
+    return 3;
+}
+
+static i64 i_vhtfm3t(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vt;
+    Mat4 mtxs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleMatrix>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleVector>(VT, vt.e);
+
+    for (int i = 0; i < 3; i++) {
+        vd.e[i].flt = mtxs[i].flt * vt.e[0].flt + mtxs[i + 4].flt * vt.e[1].flt + mtxs[i + 8].flt;
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::TripleVector>(VD, vd.e);
+    return 9;
+}
+
+static i64 i_vhtfm4t(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vt;
+    Mat4 mtxs;
+
     cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(VT, vt.e);
+
+    for (int i = 0; i < 4; i++) {
+        vd.e[i].flt = mtxs[i].flt * vt.e[0].flt + mtxs[i + 4].flt * vt.e[1].flt + mtxs[i + 8].flt * vt.e[2].flt + mtxs[i + 12].flt;
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadVector>(VD, vd.e);
+    return 10;
+}
+
+static i64 i_vi2ucq(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    vd.e[0].raw = 0;
+
+    for (int i = 0; i < 4; i++) {
+        const i32 e = (i32)vs.e[i].raw;
+
+        if (e >= 0) {
+            vd.e[0].raw |= (((u32)e >> 23) & 0xFF) << (8 * i);
+        }
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VD, vd.e);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vidt(Allegrex* cpu, const u32 instr) {
+    Vec4 vd;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = ((VD & 3) == i) ? 1.0 : 0.0;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+static i64 i_viims(Allegrex* cpu, const u32 instr) {
+    Vec4 vd;
+
+    vd.e[0].flt = (f32)(i16)UIMM;
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VT, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vlog2(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::log2f(vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmax(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::max(vs.e[i].flt, vt.e[i].flt);
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmidt(Allegrex* cpu, const u32 instr) {
+    constexpr Mat4 IDENTITY_MTX = {
+        { 1.0 }, { 0.0 }, { 0.0 }, { 0.0 },
+        { 0.0 }, { 1.0 }, { 0.0 }, { 0.0 },
+        { 0.0 }, { 0.0 }, { 1.0 }, { 0.0 },
+        { 0.0 }, { 0.0 }, { 0.0 }, { 1.0 },
+    };
+
+    cpu->set_matrix_file<type>(VD, IDENTITY_MTX);
+    return 2 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmin(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::min(vs.e[i].flt, vt.e[i].flt);
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+static i64 i_vmmulq(Allegrex* cpu, const u32 instr) {
+    Mat4 mtxd, mtxs, mtxt;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VT, mtxt);
 
     for (int column = 0; column < 4; column++) {
         for (int row = 0; row < 4; row++) {
             f32 sum = 0;
 
             for (int k = 0; k < 4; k++) {
-                sum += mtxs[4 * k + row] * mtxt[4 * column + k];
+                sum += mtxs[4 * k + column].flt * mtxt[4 * k + row].flt;
             }
 
-            mtxd[4 * column + row] = sum;
+            mtxd[4 * column + row].flt = sum;
         }
     }
 
@@ -1069,14 +1623,449 @@ static i64 i_vmmulq(Allegrex* cpu, const u32 instr) {
     return 16;
 }
 
-static i64 i_vmzeroq(Allegrex* cpu, const u32 instr) {
-    constexpr f32 ZERO_MTX[16] = {
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0,
+template<Vfpu::MatrixType type>
+static i64 i_vmone(Allegrex* cpu, const u32 instr) {
+    constexpr Mat4 ONE_MTX = {
+        { 1.0 }, { 1.0 }, { 1.0 }, { 1.0 },
+        { 1.0 }, { 1.0 }, { 1.0 }, { 1.0 },
+        { 1.0 }, { 1.0 }, { 1.0 }, { 1.0 },
+        { 1.0 }, { 1.0 }, { 1.0 }, { 1.0 },
     };
 
-    cpu->set_matrix_file<Vfpu::MatrixType::QuadMatrix>(VD, ZERO_MTX);
+    cpu->set_matrix_file<type>(VD, ONE_MTX);
+    return 2 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmov(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmscl(Allegrex* cpu, const u32 instr) {
+    Mat4 mtxd, mtxs;
+    Vec4 vt;
+
+    cpu->get_matrix_file<type>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::Scalar>(VT, vt.e);
+
+    // Here we can "safely" perform this multiplication over 16 elements...
+    // Some of them can be invalid, but set_matrix_file will just ignore them
+    for (int i = 0; i < 16; i++) {
+        mtxd[i].flt = mtxs[i].flt * vt.e[0].flt;
+    }
+
+    cpu->set_matrix_file<type>(VD, mtxd);
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmul(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt * vt.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vmzero(Allegrex* cpu, const u32 instr) {
+    constexpr Mat4 ZERO_MTX = {
+        { 0.0 }, { 0.0 }, { 0.0 }, { 0.0 },
+        { 0.0 }, { 0.0 }, { 0.0 }, { 0.0 },
+        { 0.0 }, { 0.0 }, { 0.0 }, { 0.0 },
+        { 0.0 }, { 0.0 }, { 0.0 }, { 0.0 },
+    };
+
+    cpu->set_matrix_file<type>(VD, ZERO_MTX);
+    return 2 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vneg(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = -vs.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vocp(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = 1.0 - vs.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vone(Allegrex* cpu, const u32 instr) {
+    assert(VS == 0);
+
+    Vec4 vd;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = 1.0;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
+}
+
+static i64 i_vpfxd(Allegrex* cpu, const u32 instr) {
+    const u32 decorator = instr & 0xFFF;
+
+    cpu->set_vfpu_control_reg(130, decorator);
     return 1;
+}
+
+static i64 i_vpfxs(Allegrex* cpu, const u32 instr) {
+    const u32 decorator = instr & 0xFFFFFF;
+
+    cpu->set_vfpu_control_reg(128, decorator);
+    return 1;
+}
+
+static i64 i_vpfxt(Allegrex* cpu, const u32 instr) {
+    const u32 decorator = instr & 0xFFFFFF;
+
+    cpu->set_vfpu_control_reg(129, decorator);
+    return 1;
+}
+
+static i64 i_vqmulq(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(VS, vs.e);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(VT, vt.e);
+
+    vd.e[0].flt =  vs.e[0].flt * vt.e[3].flt + vs.e[1].flt * vt.e[2].flt - vs.e[2].flt * vt.e[1].flt + vs.e[3].flt * vt.e[0].flt;
+    vd.e[1].flt = -vs.e[0].flt * vt.e[2].flt + vs.e[1].flt * vt.e[3].flt + vs.e[2].flt * vt.e[0].flt + vs.e[3].flt * vt.e[1].flt;
+    vd.e[2].flt =  vs.e[0].flt * vt.e[1].flt - vs.e[1].flt * vt.e[0].flt + vs.e[2].flt * vt.e[3].flt + vs.e[3].flt * vt.e[2].flt;
+    vd.e[3].flt = -vs.e[0].flt * vt.e[0].flt - vs.e[1].flt * vt.e[1].flt - vs.e[2].flt * vt.e[2].flt + vs.e[3].flt * vt.e[3].flt;
+
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadVector>(VD, vd.e);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vrcp(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = 1.0 / vs.e[i].flt;
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+static inline f32 get_random_float() {
+    static std::random_device random_dev;
+    static std::mt19937 rng(random_dev());
+
+    std::uniform_real_distribution<f32> dist(1.0, 2.0);
+
+    return dist(rng);
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vrndf1(Allegrex* cpu, const u32 instr) {
+    Vec4 vd;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = get_random_float();
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 2 + 3 * get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vrot(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::Scalar>(VS, vs.e);
+
+    const u32 imm5 = VT & 31;
+
+    const f32 sin = ((imm5 & 16) != 0) ? -std::sinf(M_PI_2 * vs.e[0].flt) : std::sinf(M_PI_2 * vs.e[0].flt);
+    const f32 cos = std::cosf(M_PI_2 * vs.e[0].flt);
+
+    const int sin_idx = (imm5 >> 2) & 3;
+    const int cos_idx = (imm5 >> 0) & 3;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        if (i == cos_idx) {
+            vd.e[i].flt = cos;
+        } else if ((i == sin_idx) || (cos_idx == sin_idx)) {
+            vd.e[i].flt = sin;
+        } else {
+            vd.e[i].flt = 0.0;
+        }
+    }
+    
+    cpu->set_matrix_file<type>(VD, vd.e);
+    return 8;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vrsq(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = 1.0 / std::sqrtf(vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vsat0(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        if (vs.e[i].flt < 0.0) {
+            vd.e[i].flt = 0.0;
+        } else if (vs.e[i].flt > 1.0) {
+            vd.e[i].flt = 1.0;
+        } else {
+            vd.e[i].flt = vs.e[i].flt;
+        }
+    }
+
+    cpu->set_matrix_file<type>(VD, vd.e);
+    return 3;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vscl(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<Vfpu::MatrixType::Scalar>(VT, vt.e);
+    cpu->decorate_src(vs);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt * vt.e[0].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vsin(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::sinf(M_PI_2 * vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vsqrt(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_src(vs);
+    }
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = std::sqrtf(vs.e[i].flt);
+    }
+
+    if constexpr (type == Vfpu::MatrixType::Scalar) {
+        cpu->decorate_dst(vd);
+        cpu->clear_decorators();
+        cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    } else {
+        cpu->set_matrix_file<type>(VD, vd.e);
+    }
+    
+    return 6 + get_element_count<type>();
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vsub(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs, vt;
+
+    cpu->get_matrix_file<type>(VS, vs.e);
+    cpu->get_matrix_file<type>(VT, vt.e);
+    cpu->decorate_src(vs);
+    cpu->decorate_tgt(vt);
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = vs.e[i].flt - vt.e[i].flt;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+static i64 i_vtfm3t(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vt;
+    Mat4 mtxs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleMatrix>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::TripleVector>(VT, vt.e);
+
+    for (int i = 0; i < 3; i++) {
+        vd.e[i].flt = mtxs[i].flt * vt.e[0].flt + mtxs[i + 4].flt * vt.e[1].flt + mtxs[i + 8].flt * vt.e[2].flt;
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::TripleVector>(VD, vd.e);
+    return 9;
+}
+
+static i64 i_vtfm4t(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vt;
+    Mat4 mtxs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadMatrix>(VS, mtxs);
+    cpu->get_matrix_file<Vfpu::MatrixType::QuadVector>(VT, vt.e);
+
+    for (int i = 0; i < 4; i++) {
+        vd.e[i].flt = mtxs[i].flt * vt.e[0].flt + mtxs[i + 4].flt * vt.e[1].flt + mtxs[i + 8].flt * vt.e[2].flt + mtxs[i + 12].flt * vt.e[3].flt;
+    }
+
+    cpu->set_matrix_file<Vfpu::MatrixType::QuadVector>(VD, vd.e);
+    return 10;
+}
+
+static i64 i_vwbns(Allegrex* cpu, const u32 instr) {
+    Vec4 vd, vs;
+
+    cpu->get_matrix_file<Vfpu::MatrixType::Scalar>(VS, vs.e);
+    cpu->decorate_src(vs);
+
+    const i32 imm8 = (instr >> 16) & 0xFF;
+
+    assert((imm8 >= 1) && imm8 <= 254);
+
+    const f32 p = std::exp2f(imm8 - 127);
+
+    vd.e[0].flt = std::fmodf(vs.e[0].flt, p) + ((vs.e[0].flt < 0.0) ? -p : p);
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VD, vd.e, vd.write_mask);
+    return 5;
+}
+
+template<Vfpu::MatrixType type>
+static i64 i_vzero(Allegrex* cpu, const u32 instr) {
+    assert(VS == 0);
+
+    Vec4 vd;
+
+    for (int i = 0; i < get_element_count<type>(); i++) {
+        vd.e[i].flt = 0.0;
+    }
+
+    cpu->decorate_dst(vd);
+    cpu->clear_decorators();
+    cpu->set_matrix_file<type>(VD, vd.e, vd.write_mask);
+    return 3;
 }
 
 static i64 i_wsbh(Allegrex* cpu, const u32 instr) {
@@ -1158,7 +2147,7 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
 
             return i_mtvc(cpu, instr);
         case CopOpcode::COP_OPCODE_BC:
-            switch (RT) {
+            switch (RT & 3) {
                 case CopBranchOpcode::COP_BRANCH_OPCODE_BCF:
                     return i_bcf<cop_num>(cpu, instr);
                 case CopBranchOpcode::COP_BRANCH_OPCODE_BCT:
@@ -1206,8 +2195,12 @@ static i64 i_cop(Allegrex* cpu, const u32 instr) {
                         return i_fmov(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_NEG:
                         return i_fneg(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_ROUNDW:
+                        return i_roundw(cpu, instr);
                     case FpuOpcode::FPU_OPCODE_TRUNCW:
                         return i_truncw(cpu, instr);
+                    case FpuOpcode::FPU_OPCODE_CEILW:
+                        return i_ceilw(cpu, instr);
                     default:
                         cpu->get_logger()->error("Undefined FPU SINGLE instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
                         cpu->dump_state();
@@ -1303,20 +2296,501 @@ static i64 i_special3(Allegrex* cpu, const u32 instr) {
     }
 }
 
-static i64 i_vfpu(Allegrex* cpu, const u32 instr) {
+enum Vfpu0Opcode {
+    VFPU0_OPCODE_VADD  = 0,
+    VFPU0_OPCODE_VSUB  = 1,
+    VFPU0_OPCODE_VDIVS = 7,
+};
+
+enum Vfpu1Opcode {
+    VFPU1_OPCODE_VMUL = 0,
+    VFPU1_OPCODE_VDOT = 1,
+    VFPU1_OPCODE_VSCL = 2,
+};
+
+enum Vfpu3Opcode {
+    VFPU3_OPCODE_VCMP = 0,
+    VFPU3_OPCODE_VMIN = 2,
+    VFPU3_OPCODE_VMAX = 3,
+};
+
+enum Vfpu4Opcode {
+    VFPU4_OPCODE_VMOV   = 0x000,
+    VFPU4_OPCODE_VABS   = 0x001,
+    VFPU4_OPCODE_VNEG   = 0x002,
+    VFPU4_OPCODE_VIDT   = 0x003,
+    VFPU4_OPCODE_VSAT0  = 0x004,
+    VFPU4_OPCODE_VZERO  = 0x006,
+    VFPU4_OPCODE_VONE   = 0x007,
+    VFPU4_OPCODE_VRCP   = 0x010,
+    VFPU4_OPCODE_VRSQ   = 0x011,
+    VFPU4_OPCODE_VSIN   = 0x012,
+    VFPU4_OPCODE_VCOS   = 0x013,
+    VFPU4_OPCODE_VEXP2  = 0x014,
+    VFPU4_OPCODE_VLOG2  = 0x015,
+    VFPU4_OPCODE_VSQRT  = 0x016,
+    VFPU4_OPCODE_VASIN  = 0x017,
+    VFPU4_OPCODE_VRNDF1 = 0x022,
+    VFPU4_OPCODE_VI2UCQ = 0x03C,
+    VFPU4_OPCODE_VOCP   = 0x044,
+};
+
+enum Vfpu5Opcode {
+    VFPU5_OPCODE_VPFXS = 0,
+    VFPU5_OPCODE_VPFXT = 2,
+    VFPU5_OPCODE_VPFXD = 4,
+    VFPU5_OPCODE_VIIMS = 6,
+    VFPU5_OPCODE_VFIMS = 7,
+};
+
+enum Vfpu6Opcode {
+    VFPU6_OPCODE_VMMUL  = 0,
+    VFPU6_OPCODE_VTFM3T = 2,
+    VFPU6_OPCODE_VTFM4T = 3,
+    VFPU6_OPCODE_VMSCL  = 4,
+};
+
+static i64 i_vfpu0(Allegrex* cpu, const u32 instr) {
     assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
 
-    if (!cpu->is_coprocessor_usable(CopNum::COP_NUM_VFPU)) {
+    if (!cpu->is_coprocessor_usable(2)) {
         return 1;
     }
 
-    cpu->get_logger()->warn("Unimplemented VFPU instruction {:08X} @ {:08X}", instr, cpu->get_instr_addr());
-    return 1;
+    const u32 opcode = (instr >> 23) & 7;
+    const u32 format = ((instr >> 14) & 2) | ((instr >> 7) & 1);
+
+    switch (opcode) {
+        case Vfpu0Opcode::VFPU0_OPCODE_VADD:
+            switch (format) {
+                case 0:
+                    return i_vadd<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vadd<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vadd<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vadd<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu0Opcode::VFPU0_OPCODE_VSUB:
+            switch (format) {
+                case 0:
+                    return i_vsub<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vsub<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vsub<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vsub<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu0Opcode::VFPU0_OPCODE_VDIVS:
+            switch (format) {
+                case 0:
+                    return i_vdiv<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vdiv<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vdiv<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vdiv<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        default:
+            cpu->get_logger()->error("Unimplemented VFPU0 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            exit(1);
+    }
 }
 
-enum Vfpu6Opcode {
-    VFPU6_OPCODE_VMZERO = 6,
-};
+static i64 i_vfpu1(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    const u32 opcode = (instr >> 23) & 7;
+    const u32 format = ((instr >> 14) & 2) | ((instr >> 7) & 1);
+
+    switch (opcode) {
+        case Vfpu1Opcode::VFPU1_OPCODE_VMUL:
+            switch (format) {
+                case 0:
+                    return i_vmul<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vmul<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vmul<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vmul<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu1Opcode::VFPU1_OPCODE_VDOT:
+            switch (format) {
+                case 1:
+                    return i_vdot<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vdot<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vdot<Vfpu::MatrixType::QuadVector>(cpu, instr);
+                default:
+                    cpu->get_logger()->error("Invalid Scalar format for VDOT");
+                    exit(1);
+            }
+        case Vfpu1Opcode::VFPU1_OPCODE_VSCL:
+            switch (format) {
+                case 1:
+                    return i_vscl<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vscl<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vscl<Vfpu::MatrixType::QuadVector>(cpu, instr);
+                default:
+                    cpu->get_logger()->error("Invalid Scalar format for VSCL");
+                    exit(1);
+            }
+        default:
+            cpu->get_logger()->error("Unimplemented VFPU1 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            exit(1);
+    }
+}
+
+static i64 i_vfpu3(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    const u32 opcode = (instr >> 23) & 7;
+    const u32 format = ((instr >> 14) & 2) | ((instr >> 7) & 1);
+
+    switch (opcode) {
+        case Vfpu3Opcode::VFPU3_OPCODE_VCMP:
+            switch (format) {
+                case 0:
+                    return i_vcmp<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vcmp<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vcmp<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vcmp<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu3Opcode::VFPU3_OPCODE_VMIN:
+            switch (format) {
+                case 0:
+                    return i_vmin<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vmin<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vmin<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vmin<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu3Opcode::VFPU3_OPCODE_VMAX:
+            switch (format) {
+                case 0:
+                    return i_vmax<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vmax<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vmax<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vmax<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        default:
+            cpu->get_logger()->error("Unimplemented VFPU3 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            exit(1);
+    }
+}
+
+static i64 i_vfpu4(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    const u32 opcode = (instr >> 16) & 0x3FF;
+    const u32 format = ((instr >> 14) & 2) | ((instr >> 7) & 1);
+
+    if ((opcode >> 8) == 3) {
+        assert(format == 0);
+
+        return i_vwbns(cpu, instr);
+    }
+
+    switch (opcode >> 5) {
+        case 0x00:
+        case 0x01:
+        case 0x02:
+            break;
+        case 0x03:
+            switch (format) {
+                case 0:
+                    return i_vcst<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vcst<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vcst<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vcst<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case 0x11:
+            switch (format) {
+                case 0:
+                    return i_vf2iz<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vf2iz<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vf2iz<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vf2iz<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case 0x15:
+            if ((opcode & 0x10) == 0) {
+                switch (format) {
+                    case 0:
+                        return i_vcmovt<Vfpu::MatrixType::Scalar>(cpu, instr);
+                    case 1:
+                        return i_vcmovt<Vfpu::MatrixType::PairVector>(cpu, instr);
+                    case 2:
+                        return i_vcmovt<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                    case 3:
+                        return i_vcmovt<Vfpu::MatrixType::QuadVector>(cpu, instr);
+                }
+            } else {
+                cpu->get_logger()->error("Unimplemented VCMOVF");
+                exit(1);
+            }
+        default:
+            cpu->get_logger()->error("Unimplemented VFPU4 imm5 instruction {:02X} ({:08X}) @ {:08X}", opcode >> 5, instr, cpu->get_instr_addr());
+            exit(1);
+    }
+
+    switch (opcode) {
+        case Vfpu4Opcode::VFPU4_OPCODE_VMOV:
+            switch (format) {
+                case 0:
+                    return i_vmov<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vmov<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vmov<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vmov<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VABS:
+            switch (format) {
+                case 0:
+                    return i_vabs<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vabs<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vabs<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vabs<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VNEG:
+            switch (format) {
+                case 0:
+                    return i_vneg<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vneg<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vneg<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vneg<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VIDT:
+            switch (format) {
+                case 1:
+                    return i_vidt<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 3:
+                    return i_vidt<Vfpu::MatrixType::QuadVector>(cpu, instr);
+                default:
+                    cpu->get_logger()->error("Invalid format for VIDT");
+                    exit(1);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VSAT0:
+            switch (format) {
+                case 0:
+                    return i_vsat0<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vsat0<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vsat0<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vsat0<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VZERO:
+            switch (format) {
+                case 0:
+                    return i_vzero<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vzero<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vzero<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vzero<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VONE:
+            switch (format) {
+                case 0:
+                    return i_vone<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vone<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vone<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vone<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VRCP:
+            switch (format) {
+                case 0:
+                    return i_vrcp<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vrcp<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vrcp<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vrcp<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VRSQ:
+            switch (format) {
+                case 0:
+                    return i_vrsq<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vrsq<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vrsq<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vrsq<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VSIN:
+            switch (format) {
+                case 0:
+                    return i_vsin<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vsin<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vsin<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vsin<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VCOS:
+            switch (format) {
+                case 0:
+                    return i_vcos<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vcos<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vcos<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vcos<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VEXP2:
+            switch (format) {
+                case 0:
+                    return i_vexp2<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vexp2<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vexp2<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vexp2<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VLOG2:
+            switch (format) {
+                case 0:
+                    return i_vlog2<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vlog2<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vlog2<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vlog2<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VSQRT:
+            switch (format) {
+                case 0:
+                    return i_vsqrt<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vsqrt<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vsqrt<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vsqrt<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VASIN:
+            switch (format) {
+                case 0:
+                    return i_vasin<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vasin<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vasin<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vasin<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VRNDF1:
+            switch (format) {
+                case 0:
+                    return i_vrndf1<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vrndf1<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vrndf1<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vrndf1<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        case Vfpu4Opcode::VFPU4_OPCODE_VI2UCQ:
+            assert(format == 3);
+
+            return i_vi2ucq(cpu, instr);
+        case Vfpu4Opcode::VFPU4_OPCODE_VOCP:
+            switch (format) {
+                case 0:
+                    return i_vocp<Vfpu::MatrixType::Scalar>(cpu, instr);
+                case 1:
+                    return i_vocp<Vfpu::MatrixType::PairVector>(cpu, instr);
+                case 2:
+                    return i_vocp<Vfpu::MatrixType::TripleVector>(cpu, instr);
+                case 3:
+                    return i_vocp<Vfpu::MatrixType::QuadVector>(cpu, instr);
+            }
+        default:
+            cpu->get_logger()->error("Unimplemented VFPU4 instruction {:03X} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            exit(1);
+    }
+}
+
+static i64 i_vfpu5(Allegrex* cpu, const u32 instr) {
+    assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
+
+    if (!cpu->is_coprocessor_usable(2)) {
+        return 1;
+    }
+
+    const u32 opcode = (instr >> 23) & 7;
+
+    switch (opcode) {
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXS + 0:
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXS + 1:
+            return i_vpfxs(cpu, instr);
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXT + 0:
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXT + 1:
+            return i_vpfxt(cpu, instr);
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXD + 0:
+        case Vfpu5Opcode::VFPU5_OPCODE_VPFXD + 1:
+            return i_vpfxd(cpu, instr);
+        case Vfpu5Opcode::VFPU5_OPCODE_VIIMS:
+            return i_viims(cpu, instr);
+        case Vfpu5Opcode::VFPU5_OPCODE_VFIMS:
+            return i_vfims(cpu, instr);
+    }
+
+    // Unreachable, we have all VFPU5 ops
+    exit(1);
+}
 
 static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
     assert(cpu->get_cpu_id() == CpuId::CPU_ID_SC);
@@ -1330,32 +2804,118 @@ static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
 
     // Not sure how to cleanly decode these instructions lmao
     switch (opcode) {
-        case 0:
+        case Vfpu6Opcode::VFPU6_OPCODE_VMMUL:
             switch (format) {
                 case 3:
                     return i_vmmulq(cpu, instr);
                 default:
-                    cpu->get_logger()->warn("Unimplemented VMMUL format {} ({:08X}) @ {:08X}", format, instr, cpu->get_instr_addr());
+                    cpu->get_logger()->error("Unimplemented VMMUL format {} ({:08X}) @ {:08X}", format, instr, cpu->get_instr_addr());
                     exit(1);
             }
+        case Vfpu6Opcode::VFPU6_OPCODE_VTFM3T:
+            assert((format > 0) && (format < 3));
+
+            switch (format) {
+                case 1:
+                    return i_vhtfm3t(cpu, instr);
+                case 2:
+                    return i_vtfm3t(cpu, instr);
+            }
+        case Vfpu6Opcode::VFPU6_OPCODE_VTFM4T:
+            assert(format >= 2);
+
+            switch (format) {
+                case 2:
+                    return i_vhtfm4t(cpu, instr);
+                case 3:
+                    return i_vtfm4t(cpu, instr);
+            }
+        case Vfpu6Opcode::VFPU6_OPCODE_VMSCL:
+            switch (format) {
+                case 1:
+                    return i_vmscl<Vfpu::MatrixType::PairMatrix>(cpu, instr);
+                case 2:
+                    return i_vmscl<Vfpu::MatrixType::TripleMatrix>(cpu, instr);
+                case 3:
+                    return i_vmscl<Vfpu::MatrixType::QuadMatrix>(cpu, instr);
+                default:
+                    cpu->get_logger()->error("Invalid format for VMSCL");
+                    exit(1);
+            }
+        case 5:
+            assert(format >= 2);
+
+            switch (format) {
+                case 2:
+                    return i_vcrspt(cpu, instr);
+                case 3:
+                    return i_vqmulq(cpu, instr);
+            }
         case 7:
-            switch (VT) {
-                case Vfpu6Opcode::VFPU6_OPCODE_VMZERO:
+            switch (VT >> 5) {
+                case 0:
+                    break;
+                case 1:
                     switch (format) {
+                        case 1:
+                            return i_vrot<Vfpu::MatrixType::PairVector>(cpu, instr);
+                        case 2:
+                            return i_vrot<Vfpu::MatrixType::TripleVector>(cpu, instr);
                         case 3:
-                            return i_vmzeroq(cpu, instr);
+                            return i_vrot<Vfpu::MatrixType::QuadVector>(cpu, instr);
                         default:
-                            cpu->get_logger()->warn("Unimplemented VMZERO format {} ({:08X}) @ {:08X}", format, instr, cpu->get_instr_addr());
+                            cpu->get_logger()->error("Invalid Scalar format for VROT");
                             exit(1);
                     }
-                    break;
                 default:
-                    cpu->get_logger()->warn("Unimplemented VFPU6:{} instruction {} ({:08X}) @ {:08X}", opcode, VT, instr, cpu->get_instr_addr());
+                    cpu->get_logger()->error("Unimplemented VFPU6 op7 imm5 instruction {} ({:08X}) @ {:08X}", opcode, VT >> 5, instr, cpu->get_instr_addr());
+                    exit(1);
+            }
+
+            switch (VT) {
+                case 3:
+                    switch (format) {
+                        case 1:
+                            return i_vmidt<Vfpu::MatrixType::PairMatrix>(cpu, instr);
+                        case 2:
+                            return i_vmidt<Vfpu::MatrixType::TripleMatrix>(cpu, instr);
+                        case 3:
+                            return i_vmidt<Vfpu::MatrixType::QuadMatrix>(cpu, instr);
+                        default:
+                            cpu->get_logger()->error("Invalid format for VMIDT");
+                            exit(1);
+                    }
+                case 6:
+                    switch (format) {
+                        case 1:
+                            return i_vmzero<Vfpu::MatrixType::PairMatrix>(cpu, instr);
+                        case 2:
+                            return i_vmzero<Vfpu::MatrixType::TripleMatrix>(cpu, instr);
+                        case 3:
+                            return i_vmzero<Vfpu::MatrixType::QuadMatrix>(cpu, instr);
+                        default:
+                            cpu->get_logger()->error("Invalid format for VMZERO");
+                            exit(1);
+                    }
+                case 7:
+                    switch (format) {
+                        case 1:
+                            return i_vmone<Vfpu::MatrixType::PairMatrix>(cpu, instr);
+                        case 2:
+                            return i_vmone<Vfpu::MatrixType::TripleMatrix>(cpu, instr);
+                        case 3:
+                            return i_vmone<Vfpu::MatrixType::QuadMatrix>(cpu, instr);
+                        default:
+                            cpu->get_logger()->error("Invalid format for VMONE");
+                            exit(1);
+                    }
+                default:
+                    cpu->get_logger()->error("Unimplemented VFPU6 op7 instruction {} ({:08X}) @ {:08X}", opcode, VT, instr, cpu->get_instr_addr());
                     exit(1);
             }
             break;
         default:
-            cpu->get_logger()->warn("Unimplemented VFPU6 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
+            cpu->get_logger()->error("Unimplemented VFPU6 instruction {} ({:08X}) @ {:08X}", opcode, instr, cpu->get_instr_addr());
             exit(1);
     }
 }
@@ -1417,7 +2977,10 @@ void initialize() {
     primary_table[Opcode::OPCODE_BNEL    ] = i_bnel;
     primary_table[Opcode::OPCODE_BLEZL   ] = i_blezl;
     primary_table[Opcode::OPCODE_BGTZL   ] = i_bgtzl;
+    primary_table[Opcode::OPCODE_VFPU0   ] = i_vfpu0;
+    primary_table[Opcode::OPCODE_VFPU1   ] = i_vfpu1;
     primary_table[Opcode::OPCODE_MFVME   ] = i_mfvme;
+    primary_table[Opcode::OPCODE_VFPU3   ] = i_vfpu3;
     primary_table[Opcode::OPCODE_SPECIAL2] = i_special2;
     primary_table[Opcode::OPCODE_SPECIAL3] = i_special3;
     primary_table[Opcode::OPCODE_LB      ] = i_lb;
@@ -1437,7 +3000,9 @@ void initialize() {
     primary_table[Opcode::OPCODE_LL      ] = i_ll;
     primary_table[Opcode::OPCODE_LWC1    ] = i_lwc1;
     primary_table[Opcode::OPCODE_LWC2    ] = i_lwc2;
+    primary_table[Opcode::OPCODE_VFPU4   ] = i_vfpu4;
     primary_table[Opcode::OPCODE_LQC2    ] = i_lqc2;
+    primary_table[Opcode::OPCODE_VFPU5   ] = i_vfpu5;
     primary_table[Opcode::OPCODE_SC      ] = i_sc;
     primary_table[Opcode::OPCODE_SWC1    ] = i_swc1;
     primary_table[Opcode::OPCODE_SWC2    ] = i_swc2;
@@ -1480,13 +3045,6 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU   ] = i_sltu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MAX    ] = i_max;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MIN    ] = i_min;
-
-    // Stubbed for convenience
-    primary_table[Opcode::OPCODE_VFPU0] = i_vfpu;
-    primary_table[Opcode::OPCODE_VFPU1] = i_vfpu;
-    primary_table[Opcode::OPCODE_VFPU3] = i_vfpu;
-    primary_table[Opcode::OPCODE_VFPU4] = i_vfpu;
-    primary_table[Opcode::OPCODE_VFPU5] = i_vfpu;
 
     // What is this?
     special_table[0x2E] = i_dummy;
