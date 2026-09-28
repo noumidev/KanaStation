@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <random>
 
@@ -138,6 +141,7 @@ enum SpecialOpcode {
     SPECIAL_OPCODE_SLTU    = 0x2B,
     SPECIAL_OPCODE_MAX     = 0x2C,
     SPECIAL_OPCODE_MIN     = 0x2D,
+    SPECIAL_OPCODE_MSUB    = 0x2E,
 };
 
 enum Special2Opcode {
@@ -795,6 +799,15 @@ static i64 i_movz(Allegrex* cpu, const u32 instr) {
     return 1;
 }
 
+static i64 i_msub(Allegrex* cpu, const u32 instr) {
+    const i64 acc = ((u64)cpu->get_reg(33) << 32) | cpu->get_reg(32);
+    const u64 result = acc - (i64)(i32)cpu->get_reg(RS) * (i64)(i32)cpu->get_reg(RT);
+
+    cpu->set_reg(32, (u32)result);
+    cpu->set_reg(33, (u32)(result >> 32));
+    return 1; // Not correct
+}
+
 template<int cop_num>
 static i64 i_mtc(Allegrex* cpu, const u32 instr) {
     if (!cpu->is_coprocessor_usable(cop_num)) {
@@ -1156,7 +1169,7 @@ static i64 i_vcmovt(Allegrex* cpu, const u32 instr) {
     cpu->get_matrix_file<type>(VD, vt.e);
     cpu->decorate_src(vs);
 
-    const u32 imm3 = (VT >> 1) & 7;
+    const u32 imm3 = VT & 7;
 
     assert(imm3 != 7);
 
@@ -1174,6 +1187,7 @@ static i64 i_vcmovt(Allegrex* cpu, const u32 instr) {
         }
     }
 
+    cpu->clear_decorators();
     cpu->set_matrix_file<type>(VD, vd.e);
     return 5;
 }
@@ -1261,7 +1275,12 @@ static i64 i_vcmp(Allegrex* cpu, const u32 instr) {
         }
     }
 
-    cpu->set_vfpu_control_reg(131, cc);
+    // We update only the bits that can be changed
+    const u32 old_cc  = cpu->get_vfpu_control_reg(131);
+    const u32 cc_mask = 0x30 | ((1 << get_element_count<type>()) - 1);
+
+    cpu->clear_decorators();
+    cpu->set_vfpu_control_reg(131, (old_cc & ~cc_mask) | (cc & cc_mask));
     return 3;
 }
 
@@ -1413,7 +1432,7 @@ static i64 i_vf2iz(Allegrex* cpu, const u32 instr) {
     const u32 imm5 = VT & 31;
 
     for (int i = 0; i < get_element_count<type>(); i++) {
-        vd.e[i].flt = std::truncf(vs.e[i].flt * (1 << imm5));
+        vd.e[i].raw = (u32)std::truncf(std::ldexpf(vs.e[i].flt, imm5));
     }
 
     cpu->decorate_dst(vd);
@@ -1496,6 +1515,7 @@ static i64 i_vi2ucq(Allegrex* cpu, const u32 instr) {
         }
     }
 
+    cpu->clear_decorators();
     cpu->set_matrix_file<Vfpu::MatrixType::Scalar>(VD, vd.e);
     return 3;
 }
@@ -1865,6 +1885,7 @@ static i64 i_vrot(Allegrex* cpu, const u32 instr) {
         }
     }
     
+    cpu->clear_decorators();
     cpu->set_matrix_file<type>(VD, vd.e);
     return 8;
 }
@@ -1911,6 +1932,7 @@ static i64 i_vsat0(Allegrex* cpu, const u32 instr) {
         }
     }
 
+    cpu->clear_decorators();
     cpu->set_matrix_file<type>(VD, vd.e);
     return 3;
 }
@@ -2546,7 +2568,7 @@ static i64 i_vfpu4(Allegrex* cpu, const u32 instr) {
                     return i_vf2iz<Vfpu::MatrixType::QuadVector>(cpu, instr);
             }
         case 0x15:
-            if ((opcode & 0x10) == 0) {
+            if ((opcode & 8) == 0) {
                 switch (format) {
                     case 0:
                         return i_vcmovt<Vfpu::MatrixType::Scalar>(cpu, instr);
@@ -2868,7 +2890,7 @@ static i64 i_vfpu6(Allegrex* cpu, const u32 instr) {
                             exit(1);
                     }
                 default:
-                    cpu->get_logger()->error("Unimplemented VFPU6 op7 imm5 instruction {} ({:08X}) @ {:08X}", opcode, VT >> 5, instr, cpu->get_instr_addr());
+                    cpu->get_logger()->error("Unimplemented VFPU6 op7 imm5 instruction {} ({:08X}) @ {:08X}", VT >> 5, instr, cpu->get_instr_addr());
                     exit(1);
             }
 
@@ -2944,10 +2966,6 @@ static i64 i_undefined_secondary(Allegrex* cpu, const u32 instr) {
     cpu->get_logger()->error("Undefined secondary instruction {:02X} ({:08X}) @ {:08X}", FUNCT, instr, cpu->get_instr_addr());
     cpu->dump_state();
     exit(1);
-}
-
-static i64 i_dummy(Allegrex*, const u32) {
-    return 1;
 }
 
 void initialize() {
@@ -3045,9 +3063,7 @@ void initialize() {
     special_table[SpecialOpcode::SPECIAL_OPCODE_SLTU   ] = i_sltu;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MAX    ] = i_max;
     special_table[SpecialOpcode::SPECIAL_OPCODE_MIN    ] = i_min;
-
-    // What is this?
-    special_table[0x2E] = i_dummy;
+    special_table[SpecialOpcode::SPECIAL_OPCODE_MSUB   ] = i_msub;
 }
 
 void soft_reset() {

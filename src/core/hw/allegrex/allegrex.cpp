@@ -554,11 +554,11 @@ void Allegrex::set_fgr_raw(const u32 idx, const u32 data) {
 }
 
 void Allegrex::set_fpu_cond(const bool cond) {
-    fpu.cond = cond;
+    fpu.status.condition = cond;
 }
 
 bool Allegrex::get_fpu_cond() const {
-    return fpu.cond;
+    return fpu.status.condition != 0;
 }
 
 u32 Allegrex::get_vfpu_control_reg(const u32 idx) {

@@ -162,8 +162,6 @@ struct Fpu {
             common::u32               : 7;
         };
     } status;
-
-    bool cond;
 };
 
 // CP2
@@ -547,7 +545,7 @@ public:
         } else {
             for (common::u32 j = 0; j < num_columns; j++) {
                 for (common::u32 i = 0; i < num_rows; i++) {
-                    if ((write_mask == nullptr) || (!write_mask[k + j])) {
+                    if ((write_mask == nullptr) || (!write_mask[k + i])) {
                         vfpu.matrixfile[4 * matrix_bank + ((idx + j) & 3) + 32 * ((fsl + i) & 3)] = flts[k + i];
                     }
                 }
