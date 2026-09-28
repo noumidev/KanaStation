@@ -387,7 +387,7 @@ static void start_list_exec() {
     }
 
     while ((HW_GE_STALLADDR == 0) || (HW_GE_LISTADDR < HW_GE_STALLADDR)) {
-        const ListCommand list_command = { .raw = bus->read<u32>(HW_GE_LISTADDR) };
+        const ListCommand list_command = { .raw = bus->read<u32>(HW_GE_LISTADDR & 0x1FFFFFFF) };
 
         // Update command array
         commands[list_command.command] = list_command;
@@ -496,8 +496,10 @@ static void start_list_exec() {
                 assert_interrupt(1);
                 return;
             case GeCommand::GE_COMMAND_SIGNAL:
-                logger->error("Unimplemented SIGNAL");
-                exit(1);
+                logger->debug("SIGNAL");
+
+                assert_interrupt(0);
+                break;
             case GeCommand::GE_COMMAND_FINISH:
                 logger->debug("FINISH");
 
@@ -599,7 +601,7 @@ static void start_list_exec() {
             case GeCommand::GE_COMMAND_BONEN:
                 logger->debug("BONEN");
 
-                ctx.bone_matrices.idx = list_command.param & 0x3F;
+                ctx.bone_matrices.idx = list_command.param & 0x7F;
                 break;
             case GeCommand::GE_COMMAND_BONED: {
                 assert(ctx.bone_matrices.idx < (NUM_BONES * BONE_SIZE));
@@ -1114,7 +1116,7 @@ static u32 read(const u32 addr) {
             return HW_GE_EDRAMSIZE;
         case GE_ADDR + 0x004:
         case GE_ADDR + 0x300:
-            logger->warn("Unmapped read32 @ {:08X}", addr);
+            // logger->warn("Unmapped read32 @ {:08X}", addr);
             return 0;
         default:
             logger->error("Unmapped read32 @ {:08X}", addr);
@@ -1245,6 +1247,16 @@ const f32* get_view_matrix() {
 
 const f32* get_perspective_matrix() {
     return ctx.perspective_matrix.data;
+}
+
+const f32* get_texgen_matrix() {
+    return ctx.texgen_matrix.data;
+}
+
+const f32* get_bone_matrix(const u32 idx) {
+    assert(idx < NUM_BONES);
+
+    return ctx.bone_matrices.data[idx];
 }
 
 };

@@ -97,18 +97,21 @@ enum ColorType {
 
 enum NormalType {
     NORMAL_TYPE_NONE = 0,
+    NORMAL_TYPE_FP8  = 1,
     NORMAL_TYPE_FP16 = 2,
     NORMAL_TYPE_F32  = 3,
 };
 
 enum ModcoordType {
     MODCOORD_TYPE_NONE = 0,
+    MODCOORD_TYPE_FP8  = 1,
     MODCOORD_TYPE_FP16 = 2,
     MODCOORD_TYPE_F32  = 3,
 };
 
 enum WeightType {
     WEIGHT_TYPE_NONE = 0,
+    WEIGHT_TYPE_FP8  = 1,
     WEIGHT_TYPE_F32  = 3,
 };
 
@@ -421,7 +424,11 @@ static int get_vertex_size() {
     if (!ctx.vertex_type.through_mode) {
         const u32 weight_type = ctx.vertex_type.weight_type;
 
-        size += ((weight_type != WeightType::WEIGHT_TYPE_F32) ? weight_type : 4) * ctx.vertex_type.num_weights;
+        size += ((weight_type != WeightType::WEIGHT_TYPE_F32) ? weight_type : 4) * (ctx.vertex_type.num_weights + 1);
+
+        if (weight_type == WeightType::WEIGHT_TYPE_F32) {
+            word_align = true;
+        }
     }
 
     const u32 texcoord_type = ctx.vertex_type.texcoord_type;
@@ -657,7 +664,7 @@ void set_stencil_test_enable(const bool enable) {
 
     logger->debug("Stencil test enabled: {}", enable);
 
-    assert(!enable);
+    // assert(!enable);
 }
 
 void set_antialiasing_enable(const bool enable) {
@@ -1130,7 +1137,7 @@ void set_texture_blend_params(const u32 data) {
     auto& blend_params = ctx.tex_blend_params;
 
     blend_params.func = data & 7;
-    blend_params.use_tex_alpha = (data & 0x80) != 0;
+    blend_params.use_tex_alpha = (data & 0x100) != 0;
 }
 
 void set_clear_mode(const u32 data) {
@@ -1150,8 +1157,8 @@ void set_clear_mode(const u32 data) {
 }
 
 void set_scissor_upper(const u32 data) {
-    ctx.region.sx1 = data & 0x3FF;
-    ctx.region.sy1 = (data >> 10) & 0x3FF;
+    ctx.scissor.sx1 = data & 0x3FF;
+    ctx.scissor.sy1 = (data >> 10) & 0x3FF;
 
     logger->debug(
         "New scissor (SX1: {}, SX2: {}, SY1: {}, SY2: {})",
@@ -1319,6 +1326,32 @@ static void transform_3d(std::vector<Vertex>& vertices, const f32* matrix) {
     }
 }
 
+static void transform_bone(std::vector<Vertex>& vertices) {
+    for (Vertex& vertex : vertices) {
+        f32 x = 0;
+        f32 y = 0;
+        f32 z = 0;
+    
+        for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
+            const f32* matrix = ge::get_bone_matrix(i);
+
+            const f32 w[3] = {
+                matrix[0] * vertex.x + matrix[3] * vertex.y + matrix[6] * vertex.z,
+                matrix[1] * vertex.x + matrix[4] * vertex.y + matrix[7] * vertex.z,
+                matrix[2] * vertex.x + matrix[5] * vertex.y + matrix[8] * vertex.z,
+            };
+
+            x += vertex.weights[i] * (w[0] + matrix[9 ]);
+            y += vertex.weights[i] * (w[1] + matrix[10]);
+            z += vertex.weights[i] * (w[2] + matrix[11]);
+        }
+
+        vertex.x = x;
+        vertex.y = y;
+        vertex.z = z;
+    }
+}
+
 static void transform_4d(std::vector<Vertex>& vertices, const f32* matrix) {
     for (Vertex& vertex : vertices) {
         const f32 w[4] = {
@@ -1419,6 +1452,19 @@ static void calculate_lighting(std::vector<Vertex>& vertices) {
     }
 }
 
+template<int size>
+static inline f32 get_scale_factor() {
+    if (ctx.vertex_type.through_mode) {
+        return 1.0F;
+    }
+
+    if constexpr (size == 1) {
+        return 128.0F;
+    }
+
+    return 32768.0F;
+}
+
 static Vertex fetch_vertex(u32 addr) {
     assert(ctx.vertex_type.modcoord_type != ModcoordType::MODCOORD_TYPE_NONE);
 
@@ -1433,6 +1479,15 @@ static Vertex fetch_vertex(u32 addr) {
         switch (weight_type) {
             case WeightType::WEIGHT_TYPE_NONE:
                 break;
+            case WeightType::WEIGHT_TYPE_FP8: {
+                for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
+                    // We always scale this since skinning isn't performed in Through mode
+                    vertex.weights[i] = (f32)read<u8>(addr + i) / 128.0;
+
+                    addr += sizeof(u8);
+                }
+                break;
+            }
             case WeightType::WEIGHT_TYPE_F32: {
                 for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
                     vertex.weights[i] = from_u32(read<u32>(addr));
@@ -1454,13 +1509,23 @@ static Vertex fetch_vertex(u32 addr) {
     switch (texcoord_type) {
         case TexcoordType::TEXCOORD_TYPE_NONE:
             break;
+        case TexcoordType::TEXCOORD_TYPE_FP8:
+            vertex.s = (f32)read<u8>(addr + 0) / get_scale_factor<sizeof(u8)>();
+            vertex.t = (f32)read<u8>(addr + 1) / get_scale_factor<sizeof(u8)>();
+
+            addr += 2 * sizeof(u8);
+            break;
         case TexcoordType::TEXCOORD_TYPE_FP16:
-            vertex.s = (f32)(u16)read<u16>(addr + 0);
-            vertex.t = (f32)(u16)read<u16>(addr + 2);
+            addr = align_up(addr, 2);
+
+            vertex.s = (f32)(u16)read<u16>(addr + 0) / get_scale_factor<sizeof(u16)>();
+            vertex.t = (f32)(u16)read<u16>(addr + 2) / get_scale_factor<sizeof(u16)>();
 
             addr += 2 * sizeof(u16);
             break;
         case TexcoordType::TEXCOORD_TYPE_F32:
+            addr = align_up(addr, 4);
+
             vertex.s = from_u32(read<u32>(addr + 0));
             vertex.t = from_u32(read<u32>(addr + 4));
 
@@ -1479,7 +1544,43 @@ static Vertex fetch_vertex(u32 addr) {
         case ColorType::COLOR_TYPE_NONE:
             vertex.has_colors = false;
             break;
+        case ColorType::COLOR_TYPE_RGB565: {
+            addr = align_up(addr, 2);
+
+            const u16 color = read<u16>(addr);
+
+            const u8 b = (color >> 11) & 0x1F;
+            const u8 g = (color >>  5) & 0x3F;
+            const u8 r = (color >>  0) & 0x1F;
+
+            vertex.a = 0;
+            vertex.b = (b << 3) | (b >> 2);
+            vertex.g = (g << 2) | (g >> 4);
+            vertex.r = (r << 3) | (r >> 2);
+            
+            addr += sizeof(u16);
+            break;
+        }
+        case ColorType::COLOR_TYPE_RGBA5551: {
+            addr = align_up(addr, 2);
+
+            const u16 color = read<u16>(addr);
+
+            const u8 b = (color >> 10) & 0x1F;
+            const u8 g = (color >>  5) & 0x1F;
+            const u8 r = (color >>  0) & 0x1F;
+
+            vertex.a = 0xFF * (color >> 15);
+            vertex.b = (b << 3) | (b >> 2);
+            vertex.g = (g << 3) | (g >> 2);
+            vertex.r = (r << 3) | (r >> 2);
+            
+            addr += sizeof(u16);
+            break;
+        }
         case ColorType::COLOR_TYPE_RGBA8888: {
+            addr = align_up(addr, 4);
+
             const u32 color = read<u32>(addr);
 
             vertex.a = (color >> 24) & 0xFF;
@@ -1504,7 +1605,16 @@ static Vertex fetch_vertex(u32 addr) {
         switch (normal_type) {
             case NormalType::NORMAL_TYPE_NONE:
                 break;
+            case NormalType::NORMAL_TYPE_FP8:
+                vertex.nx = (f32)(i8)read<u8>(addr + 0) / 128.0;
+                vertex.ny = (f32)(i8)read<u8>(addr + 1) / 128.0;
+                vertex.nz = (f32)(i8)read<u8>(addr + 2) / 128.0;
+
+                addr += 3 * sizeof(u8);
+                break;
             case NormalType::NORMAL_TYPE_F32:
+                addr = align_up(addr, 4);
+
                 vertex.nx = from_u32(read<u32>(addr + 0));
                 vertex.ny = from_u32(read<u32>(addr + 4));
                 vertex.nz = from_u32(read<u32>(addr + 8));
@@ -1520,12 +1630,23 @@ static Vertex fetch_vertex(u32 addr) {
     const u32 modcoord_type = ctx.vertex_type.modcoord_type;
 
     switch (modcoord_type) {
+        case ModcoordType::MODCOORD_TYPE_FP8:
+            vertex.x = (f32)(i8)read<u8>(addr + 0) / get_scale_factor<sizeof(u8)>();
+            vertex.y = (f32)(i8)read<u8>(addr + 1) / get_scale_factor<sizeof(u8)>();
+            vertex.z = (f32)(i8)read<u8>(addr + 2) / get_scale_factor<sizeof(u8)>();
+
+            addr += 3 * sizeof(u8);
+            break;
         case ModcoordType::MODCOORD_TYPE_FP16:
-            vertex.x = (f32)(i16)read<u16>(addr + 0);
-            vertex.y = (f32)(i16)read<u16>(addr + 2);
-            vertex.z = (f32)(i16)read<u16>(addr + 4);
+            addr = align_up(addr, 2);
+
+            vertex.x = (f32)(i16)read<u16>(addr + 0) / get_scale_factor<sizeof(u16)>();
+            vertex.y = (f32)(i16)read<u16>(addr + 2) / get_scale_factor<sizeof(u16)>();
+            vertex.z = (f32)(i16)read<u16>(addr + 4) / get_scale_factor<sizeof(u16)>();
             break;
         case ModcoordType::MODCOORD_TYPE_F32:
+            addr = align_up(addr, 4);
+
             vertex.x = from_u32(read<u32>(addr + 0));
             vertex.y = from_u32(read<u32>(addr + 4));
             vertex.z = from_u32(read<u32>(addr + 8));
@@ -1679,6 +1800,10 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_
         logger->trace("X: {}, Y: {}, Z: {}", vertex.x, vertex.y, vertex.z);
     }
 
+    if (!ctx.vertex_type.through_mode && (ctx.vertex_type.weight_type != WeightType::WEIGHT_TYPE_NONE)) {
+        transform_bone(vertices);
+    }
+
     if (transform_enable) {
         transform_and_lighting(vertices, is_rectangle);
     }
@@ -1819,6 +1944,15 @@ static u32 fetch_texel(const u32 u, const u32 v) {
             }
 
             return fetch_clut(read<u8>(tex0_addr + offset));
+        }
+        case TexelFormat::TEXEL_FORMAT_IDX32: {
+            u32 offset = sizeof(u32) * (v * tex0_buf_width + u);
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 32);
+            }
+
+            return fetch_clut(read<u32>(tex0_addr + offset));
         }
         default:
             logger->error("Unimplemented texture format {}", TEXEL_FORMAT_NAMES[ctx.texture_format]);
@@ -1978,10 +2112,10 @@ static Color blend(const Color color, const Color old_color) {
 
     switch (blend_params.src_input) {
         case 1:
-            // Reverse destination alpha
-            a_color.r = 255 - dst_color.a;
-            a_color.g = 255 - dst_color.a;
-            a_color.b = 255 - dst_color.a;
+            // Reverse destination color
+            a_color.r = 255 - dst_color.r;
+            a_color.g = 255 - dst_color.g;
+            a_color.b = 255 - dst_color.b;
             a_color.a = 255 - dst_color.a;
             break;
         case 2:
@@ -2056,10 +2190,9 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             exit(1);
     }
 
-    // Something about this is odd, I'll turn it off for now
-    /* if (!blend_params.use_tex_alpha) {
+    if (!blend_params.use_tex_alpha) {
         final_color.a = vertex_color.a;
-    } */
+    }
 
     return final_color;
 }
@@ -2316,6 +2449,21 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
                                 s = s * ctx.texture_scale[0] + ctx.texture_offset[0];
                                 t = t * ctx.texture_scale[1] + ctx.texture_offset[1];
+                                break;
+                            }
+                            case 1: {
+                                // Projection mapping
+                                const f32* matrix = ge::get_texgen_matrix();
+
+                                const f32 w[3] = {
+                                    matrix[0] * p.x + matrix[3] * p.y + matrix[6] * z,
+                                    matrix[1] * p.x + matrix[4] * p.y + matrix[7] * z,
+                                    matrix[2] * p.x + matrix[5] * p.y + matrix[8] * z,
+                                };
+
+                                s = w[0] + matrix[9];
+                                t = w[1] + matrix[10];
+                                // q = w[2] + matrix[11];
                                 break;
                             }
                             case 2: {

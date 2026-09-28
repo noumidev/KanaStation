@@ -19,5 +19,7 @@ void shutdown();
 const common::f32* get_world_matrix();
 const common::f32* get_view_matrix();
 const common::f32* get_perspective_matrix();
+const common::f32* get_texgen_matrix();
+const common::f32* get_bone_matrix(const common::u32 idx);
 
 };
