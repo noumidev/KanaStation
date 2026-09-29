@@ -4,8 +4,9 @@ KanaStation is a low-level PlayStation Portable emulator aiming to emulate as mu
 ## Progress
 - boots PSP-1000 boot ROM
 - boots OFW 1.50 IPL (and some custom ones)
-- boots OFW 1.50
+- boots various OFWs
 - boots VSH/XMB
+- boots some games and homebrew
 
 This is a **work-in-progress** and very early!
 
@@ -17,6 +18,12 @@ Drop the provided `config.toml` in the same folder as the executable and change 
 - `hacks.dmacplus` scans out the GE framebuffer instead of any framebuffer, and ignores transfers to RAM on the SC2ME channel. This prevents certain `sceMpeg` related crashes and black screens, but causes flashing visuals and noisy sounds upon gameboot! Off by default, but required to boot games and homebrew...
 - `splines` enables the rendering of B-Splines. They are slow and currently a little broken, but also required for the XMB waves.
 - Set up all paths. Boot ROM and NAND are required, UMD and Memory Stick are optional.
+
+## Infos
+- changes to NAND and the Memory Stick are not currently saved
+- the emulator gets very(!!) slow when 3D is used
+- many games and homebrew can't boot yet, and those that do often experience graphical issues, no sound, ...
+- PSP-2000/Slim firmware can't boot yet
 
 ## Build instructions
 ```
@@ -31,6 +38,6 @@ make
 None of the code in this repository was written using AI, and I would like to keep it that way. I will not accept any contributions that were AI-assisted.
 
 ## Screenshots
-<img width="592" height="416" alt="image" src="https://github.com/user-attachments/assets/2c9aed89-b0f8-4c8c-8cdc-d6cf47abc260" />
-<img width="592" height="416" alt="image" src="https://github.com/user-attachments/assets/6686b226-9708-4292-b0c1-f0bec50beef0" />
-<img width="592" height="416" alt="image" src="https://github.com/user-attachments/assets/6356cffd-27d9-4b5b-a751-b12bb607343f" />
+<img width="536" height="344" alt="image" src="https://github.com/user-attachments/assets/1ccd0e4d-a8a4-4541-9d54-73bf8189dec0" />
+<img width="536" height="344" alt="image" src="https://github.com/user-attachments/assets/3040f4d2-af39-46a9-b807-8ae3b3e68b7a" />
+<img width="536" height="344" alt="image" src="https://github.com/user-attachments/assets/85775e42-e202-4124-9cca-dec3429195b5" />
