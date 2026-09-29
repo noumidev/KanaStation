@@ -8,6 +8,8 @@
 #pragma once
 
 #include <cinttypes>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace common {
@@ -76,6 +78,16 @@ inline f32 from_u32(const u32 data) {
     std::memcpy(&flt, &data, sizeof(data));
 
     return flt;
+}
+
+inline f32 f32_saturate_to_i32(const f32 data) {
+    if (std::isnan(data) || (data > (f32)INT32_MAX)) {
+        return (f32)INT32_MAX;
+    } else if (data < (f32)INT32_MIN) {
+        return (f32)INT32_MIN;
+    }
+
+    return data;
 }
 
 }
