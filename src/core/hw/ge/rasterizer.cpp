@@ -336,6 +336,8 @@ static struct Context {
     u32 texture_format;
     bool fast_mode;
 
+    Color tex_env_color;
+
     struct {
         u32 addr;
         ClutFormat format;
@@ -1140,6 +1142,12 @@ void set_texture_blend_params(const u32 data) {
     blend_params.use_tex_alpha = (data & 0x100) != 0;
 }
 
+void set_texture_env_color(const u32 data) {
+    ctx.tex_env_color.r = (data >>  0) & 0xFF;
+    ctx.tex_env_color.g = (data >>  8) & 0xFF;
+    ctx.tex_env_color.b = (data >> 16) & 0xFF;
+}
+
 void set_clear_mode(const u32 data) {
     auto &clear_mode = ctx.clear_mode;
 
@@ -1476,6 +1484,8 @@ static Vertex fetch_vertex(u32 addr) {
         // Only fetch weights in Normal mode
         const u32 weight_type = ctx.vertex_type.weight_type;
 
+        vertex.has_weights = weight_type != WeightType::WEIGHT_TYPE_NONE;
+
         switch (weight_type) {
             case WeightType::WEIGHT_TYPE_NONE:
                 break;
@@ -1489,6 +1499,8 @@ static Vertex fetch_vertex(u32 addr) {
                 break;
             }
             case WeightType::WEIGHT_TYPE_F32: {
+                addr = align_up(addr, 4);
+
                 for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
                     vertex.weights[i] = from_u32(read<u32>(addr));
 
@@ -1747,6 +1759,7 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_
         }
 
         if (morph_enable) {
+            vertex.has_weights = ctx.vertex_type.weight_type != WeightType::WEIGHT_TYPE_NONE;
             vertex.has_texcoords = ctx.vertex_type.texcoord_type != TexcoordType::TEXCOORD_TYPE_NONE;
             vertex.has_colors = ctx.vertex_type.color_type != ColorType::COLOR_TYPE_NONE;
 
@@ -1754,6 +1767,12 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_
                 const f32 weight = ctx.weights[j];
 
                 Vertex blend_vertex = fetch_vertex(vertex_addr);
+
+                if (blend_vertex.has_weights) {
+                    for (u32 i = 0; i <= ctx.vertex_type.num_weights; i++) {
+                        vertex.weights[i] += blend_vertex.weights[i] * weight;
+                    }
+                }
 
                 if (blend_vertex.has_texcoords) {
                     vertex.s += blend_vertex.s * weight;
@@ -1915,6 +1934,15 @@ static u32 fetch_texel(const u32 u, const u32 v) {
             }
 
             return from_rgba5551(read<u16>(tex0_addr + offset));
+        }
+        case TexelFormat::TEXEL_FORMAT_RGBA4444: {
+            u32 offset = sizeof(u16) * (v * tex0_buf_width + u);
+
+            if (ctx.fast_mode) {
+                offset = swizzle_to_linear(u, v, tex0_buf_width, 16);
+            }
+
+            return from_rgba4444(read<u16>(tex0_addr + offset));
         }
         case TexelFormat::TEXEL_FORMAT_RGBA8888: {
             u32 offset = sizeof(u32) * (v * tex0_buf_width + u);
@@ -2179,19 +2207,49 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             final_color.r = color_multiply(vertex_color.r, tex_color.r);
             final_color.g = color_multiply(vertex_color.g, tex_color.g);
             final_color.b = color_multiply(vertex_color.b, tex_color.b);
-            final_color.a = color_multiply(vertex_color.a, tex_color.a);
+
+            if (blend_params.use_tex_alpha) {
+                final_color.a = color_multiply(vertex_color.a, tex_color.a);
+            } else {
+                final_color.a = vertex_color.a;
+            }
+            break;
+        case 1:
+            // Decal
+            if (blend_params.use_tex_alpha) {
+                final_color.r = color_add(color_multiply(255 - tex_color.a, vertex_color.r), color_multiply(tex_color.a, tex_color.r));
+                final_color.g = color_add(color_multiply(255 - tex_color.a, vertex_color.g), color_multiply(tex_color.a, tex_color.g));
+                final_color.b = color_add(color_multiply(255 - tex_color.a, vertex_color.b), color_multiply(tex_color.a, tex_color.b));
+            } else {
+                final_color.r = tex_color.r;
+                final_color.g = tex_color.g;
+                final_color.b = tex_color.b;
+            }
+
+            final_color.a = vertex_color.a;
+            break;
+        case 2:
+            // Blend
+            final_color.r = color_add(color_multiply(255 - tex_color.r, vertex_color.r), color_multiply(tex_color.r, ctx.tex_env_color.r));
+            final_color.g = color_add(color_multiply(255 - tex_color.g, vertex_color.g), color_multiply(tex_color.g, ctx.tex_env_color.g));
+            final_color.b = color_add(color_multiply(255 - tex_color.b, vertex_color.b), color_multiply(tex_color.b, ctx.tex_env_color.b));
+            final_color.a = vertex_color.a;
             break;
         case 3:
             // Replace
-            final_color = tex_color;
+            final_color.r = tex_color.r;
+            final_color.g = tex_color.g;
+            final_color.b = tex_color.b;
+            
+            if (blend_params.use_tex_alpha) {
+                final_color.a = tex_color.a;
+            } else {
+                final_color.a = vertex_color.a;
+            }
             break;
         default:
             logger->error("Unimplemented texture function {}", blend_params.func);
             exit(1);
-    }
-
-    if (!blend_params.use_tex_alpha) {
-        final_color.a = vertex_color.a;
     }
 
     return final_color;
@@ -2379,6 +2437,8 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
     assert(!ctx.clear_mode.enable);
 
+    const Color c_color = { .r = (u8)c.r, .g = (u8)c.g, .b = (u8)c.b, .a = (u8)c.a };
+
     if (edge_function(a, b, c) < 0.0) {
         std::swap(b, c);
     }
@@ -2427,10 +2487,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                         vertex_color.b = interpolate(w0, w1, w2, a.b, b.b, c.b, area);
                         vertex_color.a = interpolate(w0, w1, w2, a.a, b.a, c.a, area);
                     } else {
-                        vertex_color.r = c.r;
-                        vertex_color.g = c.g;
-                        vertex_color.b = c.b;
-                        vertex_color.a = c.a;
+                        vertex_color = c_color;
                     }
                 } else {
                     // Use model ambient color if there is no color data

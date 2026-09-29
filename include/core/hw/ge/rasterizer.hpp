@@ -81,6 +81,7 @@ void set_texture_format(const common::u32 format);
 void load_clut(const common::u32 num_palettes);
 void set_clut(const common::u32 data);
 void set_texture_blend_params(const common::u32 data);
+void set_texture_env_color(const common::u32 data);
 void set_clear_mode(const common::u32 data);
 void set_scissor_upper(const common::u32 data);
 void set_scissor_lower(const common::u32 data);

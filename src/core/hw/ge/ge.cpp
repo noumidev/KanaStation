@@ -807,7 +807,7 @@ static void start_list_exec() {
                 break;
             case GeCommand::GE_COMMAND_FBW: {
                 const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x3C0;
+                const u32 width = list_command.param & 0x7C0;
 
                 logger->debug("FBW (address: {:08X}, width: {})", addr_hi, width);
                 rasterizer::set_framebuffer_width(width);
@@ -819,7 +819,7 @@ static void start_list_exec() {
                 break;
             case GeCommand::GE_COMMAND_ZBW: {
                 const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x3C0;
+                const u32 width = list_command.param & 0x7C0;
 
                 logger->debug("ZBW (address: {:08X}, width: {})", addr_hi, width);
                 rasterizer::set_depth_buffer_width(width);
@@ -850,7 +850,7 @@ static void start_list_exec() {
                 const int idx = list_command.command - GeCommand::GE_COMMAND_TBW0;
 
                 const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x3FF;
+                const u32 width = list_command.param & 0x7FF;
 
                 logger->debug("TBW{} (address: {:08X}, width: {})", idx, addr_hi, width);
                 rasterizer::set_texture_buffer_width(idx, addr_hi, width);
@@ -938,6 +938,10 @@ static void start_list_exec() {
             case GeCommand::GE_COMMAND_TFUNC:
                 logger->debug("TFUNC");
                 rasterizer::set_texture_blend_params(list_command.param);
+                break;
+            case GeCommand::GE_COMMAND_TEC:
+                logger->debug("TEC");
+                rasterizer::set_texture_env_color(list_command.param);
                 break;
             case GeCommand::GE_COMMAND_TFLUSH:
                 logger->debug("TFLUSH");
