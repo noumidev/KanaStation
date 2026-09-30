@@ -102,7 +102,7 @@ SDL_AppResult SDL_AppInit(void**, int, char**) {
 
     SDL_AudioSpec spec;
 
-    spec.freq = 44100;
+    spec.freq = 48000;
     spec.format = SDL_AUDIO_S16;
     spec.channels = 2;
 
