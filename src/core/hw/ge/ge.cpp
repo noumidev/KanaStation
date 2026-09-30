@@ -17,6 +17,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <core/kanacore.hpp>
+#include <core/scheduler.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
 #include <core/hw/ge/rasterizer.hpp>
@@ -359,9 +360,17 @@ static struct {
         u32 idx;
         f32 data[TGEN_SIZE];
     } texgen_matrix;
+
+    bool list_exec_pending;
+    i64 cycles;
 } ctx;
 
 static std::shared_ptr<spdlog::logger> logger;
+
+static u32 event_id = scheduler::NO_EVENT_ID;
+
+constexpr u32 MAX_GE_CYCLES = 128;
+constexpr i64 GE_RESUME_DELAY = 512;
 
 static void check_pending_interrupts() {
     if (HW_GE_INTRSTAT != 0) {
@@ -378,15 +387,701 @@ static void assert_interrupt(const int intr_num) {
     check_pending_interrupts();
 }
 
+static void end_list_exec();
+
+static bool start_command(const ListCommand list_command) {
+    switch (list_command.command) {
+        case GeCommand::GE_COMMAND_NOP:
+            logger->debug("NOP");
+            break;
+        case GeCommand::GE_COMMAND_VADR:
+            rasterizer::set_vertex_addr((list_command.param | rasterizer::get_base()) + HW_GE_ORGADDR0);
+
+            logger->debug("VADR (address: {:08X})", rasterizer::get_vertex_addr());
+            break;
+        case GeCommand::GE_COMMAND_IADR:
+            rasterizer::set_index_addr((list_command.param | rasterizer::get_base()) + HW_GE_ORGADDR0);
+
+            logger->debug("IADR (address: {:08X})", rasterizer::get_index_addr());
+            break;
+        case GeCommand::GE_COMMAND_PRIM: {
+            const u32 count = (list_command.param >> 0) & 0xFFFF;
+            const u32 prim_type = (list_command.param >> 16) & 7;
+
+            logger->debug("PRIM (count: {})", count);
+
+            rasterizer::draw_primitive(count, prim_type);
+            break;
+        }
+        case GeCommand::GE_COMMAND_BEZIER: {
+            const u32 u_count = (list_command.param >> 0) & 0xFF;
+            const u32 v_count = (list_command.param >> 8) & 0xFF;
+
+            logger->debug("BEZIER (U count: {}, V count: {})", u_count, v_count);
+
+            rasterizer::draw_bezier(u_count, v_count);
+            break;
+        }
+        case GeCommand::GE_COMMAND_SPLINE: {
+            const u32 u_count = (list_command.param >> 0) & 0xFF;
+            const u32 v_count = (list_command.param >> 8) & 0xFF;
+
+            const u32 u_knot_type = (list_command.param >> 16) & 3;
+            const u32 v_knot_type = (list_command.param >> 18) & 3;
+
+            logger->debug("SPLINE (U count: {}, V count: {})", list_command.param & 0xFF, (list_command.param >> 8) & 0xFF);
+            
+            rasterizer::draw_spline(u_count, v_count, u_knot_type, v_knot_type);
+            break;
+        }
+        case GeCommand::GE_COMMAND_JUMP:
+            HW_GE_LISTADDR = (rasterizer::get_base() | list_command.param) + HW_GE_ORGADDR0;
+
+            logger->debug("JUMP (address: {:08X})", HW_GE_LISTADDR);
+            break;
+        case GeCommand::GE_COMMAND_BJUMP:
+            logger->warn("Unimplemented BJUMP {:08X}", list_command.raw);
+            break;
+        case GeCommand::GE_COMMAND_CALL: {
+            switch (HW_GE_LISTSTAT.depth) {
+                case 0:
+                    HW_GE_LINKADDR0 = HW_GE_LISTADDR;
+                    HW_GE_ORGADDR1  = HW_GE_ORGADDR0;
+                    HW_GE_LISTSTAT.depth = 1;
+                    break;
+                case 1:
+                    HW_GE_LINKADDR1 = HW_GE_LISTADDR;
+                    HW_GE_ORGADDR2  = HW_GE_ORGADDR0;
+                    HW_GE_LISTSTAT.depth = 3;
+                    break;
+                default:
+                    logger->error("Invalid CALL depth");
+                    exit(1);
+            }
+
+            HW_GE_LISTADDR = (rasterizer::get_base() | list_command.param) + HW_GE_ORGADDR0;
+
+            logger->debug("CALL (address: {:08X})", HW_GE_LISTADDR);
+            break;
+        }
+        case GeCommand::GE_COMMAND_RET: {
+            switch (HW_GE_LISTSTAT.depth) {
+                case 1:
+                    HW_GE_LISTADDR = HW_GE_LINKADDR0;
+                    HW_GE_ORGADDR0 = HW_GE_ORGADDR1;
+                    HW_GE_LISTSTAT.depth = 0;
+                    break;
+                case 3:
+                    HW_GE_LISTADDR = HW_GE_LINKADDR1;
+                    HW_GE_ORGADDR0 = HW_GE_ORGADDR2;
+                    HW_GE_LISTSTAT.depth = 1;
+                    break;
+                default:
+                    logger->error("Invalid RET depth {}", (u32)HW_GE_LISTSTAT.depth);
+                    exit(1);
+            }
+
+            logger->debug("RET (address: {:08X})", HW_GE_LISTADDR);
+            break;
+        }
+        case GeCommand::GE_COMMAND_END:
+            logger->debug("END");
+
+            end_list_exec();
+            return false;
+        case GeCommand::GE_COMMAND_SIGNAL:
+            logger->debug("SIGNAL");
+
+            assert_interrupt(0);
+            break;
+        case GeCommand::GE_COMMAND_FINISH:
+            logger->debug("FINISH");
+
+            assert_interrupt(2);
+            break;
+        case GeCommand::GE_COMMAND_BASE:
+            rasterizer::set_base((list_command.param & 0xFF0000) << 8);
+
+            logger->debug("BASE (address: {:08X})", rasterizer::get_base());
+            break;
+        case GeCommand::GE_COMMAND_VTYPE:
+            logger->debug("VTYPE");
+            rasterizer::set_vertex_type(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_OFFSET:
+            HW_GE_ORGADDR0 = list_command.param << 8;
+
+            logger->debug("OFFSET (address: {:08X})", HW_GE_ORGADDR0);
+            break;
+        case GeCommand::GE_COMMAND_ORIGIN:
+            HW_GE_ORGADDR0 = HW_GE_LISTADDR - sizeof(u32);
+
+            logger->debug("ORIGIN (address: {:08X})", HW_GE_ORGADDR0);
+            break;
+        case GeCommand::GE_COMMAND_REGION1:
+            logger->debug("REGION1");
+            rasterizer::set_region_upper(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_REGION2:
+            logger->debug("REGION2");
+            rasterizer::set_region_lower(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_LTE:
+            logger->debug("LTE");
+            rasterizer::set_lighting_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_LE0:
+        case GeCommand::GE_COMMAND_LE1:
+        case GeCommand::GE_COMMAND_LE2:
+        case GeCommand::GE_COMMAND_LE3: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_LE0;
+
+            logger->debug("LE{}", idx);
+            rasterizer::set_light_enable(idx, (list_command.param & 1) != 0);
+            break;
+        }
+        case GeCommand::GE_COMMAND_CLE:
+            logger->debug("CLE");
+            rasterizer::set_clipping_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_BCE:
+            logger->debug("BCE");
+            rasterizer::set_backface_culling_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_TME:
+            logger->debug("TME");
+            rasterizer::set_texture_mapping_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_FGE:
+            logger->debug("FGE");
+            rasterizer::set_fogging_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_DTE:
+            logger->debug("DTE");
+            rasterizer::set_dithering_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_ABE:
+            logger->debug("ABE");
+            rasterizer::set_alpha_blending_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_ATE:
+            logger->debug("ATE");
+            rasterizer::set_alpha_test_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_ZTE:
+            logger->debug("ZTE");
+            rasterizer::set_depth_test_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_STE:
+            logger->debug("STE");
+            rasterizer::set_stencil_test_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_AAE:
+            logger->debug("AAE");
+            rasterizer::set_antialiasing_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_PCE:
+            logger->debug("PCE");
+            rasterizer::set_patch_culling_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_CTE:
+            logger->debug("CTE");
+            rasterizer::set_color_test_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_LOE:
+            logger->debug("LOE");
+            rasterizer::set_logic_operation_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_BONEN:
+            logger->debug("BONEN");
+
+            ctx.bone_matrices.idx = list_command.param & 0x7F;
+            break;
+        case GeCommand::GE_COMMAND_BONED: {
+            assert(ctx.bone_matrices.idx < (NUM_BONES * BONE_SIZE));
+
+            const u32 bone_num = ctx.bone_matrices.idx / 12;
+            const u32 bone_idx = ctx.bone_matrices.idx % 12;
+
+            ctx.bone_matrices.data[bone_num][bone_idx] = from_u32(list_command.param << 8);
+            ctx.bone_matrices.idx++;
+
+            logger->debug("BONED (BONE{}{}: {})", (char)('A' + bone_num), bone_idx, ctx.bone_matrices.data[bone_num][bone_idx]);
+            break;
+        }
+        case GeCommand::GE_COMMAND_WEIGHT0:
+        case GeCommand::GE_COMMAND_WEIGHT1:
+        case GeCommand::GE_COMMAND_WEIGHT2:
+        case GeCommand::GE_COMMAND_WEIGHT3:
+        case GeCommand::GE_COMMAND_WEIGHT4:
+        case GeCommand::GE_COMMAND_WEIGHT5:
+        case GeCommand::GE_COMMAND_WEIGHT6:
+        case GeCommand::GE_COMMAND_WEIGHT7: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_WEIGHT0;
+
+            logger->debug("WEIGHT{}", idx);
+            rasterizer::set_morph_weight(idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_DIVIDE: {
+            const u32 u_div = (list_command.param >> 0) & 0x7F;
+            const u32 v_div = (list_command.param >> 8) & 0x7F;
+
+            logger->debug("DIVIDE (U division: {}, V division: {})", u_div, v_div);
+            rasterizer::set_patch_division(u_div, v_div);
+            break;
+        }
+        case GeCommand::GE_COMMAND_PPM:
+            logger->debug("PPM");
+            rasterizer::set_patch_primitive(list_command.param & 3);
+            break;
+        case GeCommand::GE_COMMAND_PFACE:
+            logger->debug("PFACE");
+            rasterizer::set_patch_face((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_WORLDN:
+            logger->debug("WORLDN");
+
+            ctx.world_matrix.idx = list_command.param & 0xF;
+            break;
+        case GeCommand::GE_COMMAND_WORLDD:
+            assert(ctx.world_matrix.idx < WORLD_SIZE);
+
+            ctx.world_matrix.data[ctx.world_matrix.idx++] = from_u32(list_command.param << 8);
+
+            logger->debug("WORLDD (WORLD{}: {})", ctx.world_matrix.idx - 1, ctx.world_matrix.data[ctx.world_matrix.idx - 1]);
+
+            if (ctx.world_matrix.idx >= WORLD_SIZE) {
+                ctx.world_matrix.idx = 0;
+            }
+            break;
+        case GeCommand::GE_COMMAND_VIEWN:
+            logger->debug("VIEWN");
+
+            ctx.view_matrix.idx = list_command.param & 0xF;
+            break;
+        case GeCommand::GE_COMMAND_VIEWD:
+            assert(ctx.view_matrix.idx < VIEW_SIZE);
+
+            ctx.view_matrix.data[ctx.view_matrix.idx++] = from_u32(list_command.param << 8);
+
+            logger->debug("VIEWD (VIEW{}: {})", ctx.view_matrix.idx - 1, ctx.view_matrix.data[ctx.view_matrix.idx - 1]);
+
+            // Unsure if this is how it works
+            if (ctx.view_matrix.idx >= VIEW_SIZE) {
+                ctx.view_matrix.idx = 0;
+            }
+            break;
+        case GeCommand::GE_COMMAND_PROJN:
+            logger->debug("PROJN");
+
+            ctx.perspective_matrix.idx = list_command.param & 0xF;
+            break;
+        case GeCommand::GE_COMMAND_PROJD:
+            assert(ctx.perspective_matrix.idx < PROJ_SIZE);
+
+            ctx.perspective_matrix.data[ctx.perspective_matrix.idx++] = from_u32(list_command.param << 8);
+
+            logger->debug("PROJD (PROJ{}: {})", ctx.perspective_matrix.idx - 1, ctx.perspective_matrix.data[ctx.perspective_matrix.idx - 1]);
+
+            // Unsure if this is how it works
+            if (ctx.perspective_matrix.idx >= PROJ_SIZE) {
+                ctx.perspective_matrix.idx = 0;
+            }
+            break;
+        case GeCommand::GE_COMMAND_TGENN:
+            logger->debug("TGENN");
+
+            ctx.texgen_matrix.idx = list_command.param & 0xF;
+            break;
+        case GeCommand::GE_COMMAND_TGEND:
+            assert(ctx.texgen_matrix.idx < TGEN_SIZE);
+
+            ctx.texgen_matrix.data[ctx.texgen_matrix.idx++] = from_u32(list_command.param << 8);
+
+            logger->debug("TGEND (TGEN{}: {})", ctx.texgen_matrix.idx - 1, ctx.texgen_matrix.data[ctx.texgen_matrix.idx - 1]);
+
+            // Unsure if this is how it works
+            if (ctx.texgen_matrix.idx >= TGEN_SIZE) {
+                ctx.texgen_matrix.idx = 0;
+            }
+            break;
+        case GeCommand::GE_COMMAND_SX:
+        case GeCommand::GE_COMMAND_SY:
+        case GeCommand::GE_COMMAND_SZ: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_SX;
+
+            logger->debug("S{}", (char)('X' + idx));
+            rasterizer::set_viewport_scale(idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_TX:
+        case GeCommand::GE_COMMAND_TY:
+        case GeCommand::GE_COMMAND_TZ: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_TX;
+
+            logger->debug("T{}", (char)('X' + idx));
+            rasterizer::set_viewport_offset(idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_SU:
+        case GeCommand::GE_COMMAND_SV: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_SU;
+
+            logger->debug("S{}", (char)('U' + idx));
+            rasterizer::set_texture_scale(idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_TU:
+        case GeCommand::GE_COMMAND_TV: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_TU;
+
+            logger->debug("T{}", (char)('U' + idx));
+            rasterizer::set_texture_offset(idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_OFFSETX:
+            logger->debug("OFFSETX");
+            rasterizer::set_offset_x((f32)(u16)list_command.param / 16);
+            break;
+        case GeCommand::GE_COMMAND_OFFSETY:
+            logger->debug("OFFSETY");
+            rasterizer::set_offset_y((f32)(u16)list_command.param / 16);
+            break;
+        case GeCommand::GE_COMMAND_SHADE:
+            logger->debug("SHADE");
+            rasterizer::set_gouraud_shading_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_MEC:
+        case GeCommand::GE_COMMAND_MAC:
+        case GeCommand::GE_COMMAND_MDC:
+        case GeCommand::GE_COMMAND_MSC: {
+            constexpr char MODEL_COLOR[] = { 'E', 'A', 'D', 'S' };
+
+            const int idx = list_command.command - GeCommand::GE_COMMAND_MEC;
+
+            logger->debug("M{}C: {:06X}", MODEL_COLOR[idx], list_command.param);
+            rasterizer::set_model_color(idx, list_command.param);
+            break;
+        }
+        case GeCommand::GE_COMMAND_MAA:
+            logger->debug("MAA: {:02X}", list_command.param & 0xFF);
+            rasterizer::set_model_alpha(list_command.param & 0xFF);
+            break;
+        case GeCommand::GE_COMMAND_AC:
+            logger->debug("AC: {:06X}", list_command.param);
+            rasterizer::set_ambient_color(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_AA:
+            logger->debug("AA: {:02X}", list_command.param & 0xFF);
+            rasterizer::set_ambient_alpha(list_command.param & 0xFF);
+            break;
+        case GeCommand::GE_COMMAND_LX0:
+        case GeCommand::GE_COMMAND_LY0:
+        case GeCommand::GE_COMMAND_LZ0:
+        case GeCommand::GE_COMMAND_LX1:
+        case GeCommand::GE_COMMAND_LY1:
+        case GeCommand::GE_COMMAND_LZ1:
+        case GeCommand::GE_COMMAND_LX2:
+        case GeCommand::GE_COMMAND_LY2:
+        case GeCommand::GE_COMMAND_LZ2:
+        case GeCommand::GE_COMMAND_LX3:
+        case GeCommand::GE_COMMAND_LY3:
+        case GeCommand::GE_COMMAND_LZ3: {
+            const int light_idx = (list_command.command - GeCommand::GE_COMMAND_LX0) / 3;
+            const int idx = (list_command.command - GeCommand::GE_COMMAND_LX0) % 3;
+
+            logger->debug("L{}{}", (char)('X' + idx), light_idx);
+            rasterizer::set_light_vector(light_idx, idx, from_u32(list_command.param << 8));
+            break;
+        }
+        case GeCommand::GE_COMMAND_FBP:
+            logger->debug("FBP (address: {:06X})", list_command.param);
+            rasterizer::set_framebuffer_base(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_FBW: {
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+            const u32 width = list_command.param & 0x7C0;
+
+            logger->debug("FBW (address: {:08X}, width: {})", addr_hi, width);
+            rasterizer::set_framebuffer_width(width);
+            break;
+        }
+        case GeCommand::GE_COMMAND_ZBP:
+            logger->debug("ZBP (address: {:06X})", list_command.param);
+            rasterizer::set_depth_buffer_base(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_ZBW: {
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+            const u32 width = list_command.param & 0x7C0;
+
+            logger->debug("ZBW (address: {:08X}, width: {})", addr_hi, width);
+            rasterizer::set_depth_buffer_width(width);
+            break;
+        }
+        case GeCommand::GE_COMMAND_TBP0:
+        case GeCommand::GE_COMMAND_TBP1:
+        case GeCommand::GE_COMMAND_TBP2:
+        case GeCommand::GE_COMMAND_TBP3:
+        case GeCommand::GE_COMMAND_TBP4:
+        case GeCommand::GE_COMMAND_TBP5:
+        case GeCommand::GE_COMMAND_TBP6:
+        case GeCommand::GE_COMMAND_TBP7: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_TBP0;
+
+            logger->debug("TBP{} (address: {:06X})", idx, list_command.param);
+            rasterizer::set_texture_base(idx, list_command.param);
+            break;
+        }
+        case GeCommand::GE_COMMAND_TBW0:
+        case GeCommand::GE_COMMAND_TBW1:
+        case GeCommand::GE_COMMAND_TBW2:
+        case GeCommand::GE_COMMAND_TBW3:
+        case GeCommand::GE_COMMAND_TBW4:
+        case GeCommand::GE_COMMAND_TBW5:
+        case GeCommand::GE_COMMAND_TBW6:
+        case GeCommand::GE_COMMAND_TBW7: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_TBW0;
+
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+            const u32 width = list_command.param & 0x7FF;
+
+            logger->debug("TBW{} (address: {:08X}, width: {})", idx, addr_hi, width);
+            rasterizer::set_texture_buffer_width(idx, addr_hi, width);
+            break;
+        }
+        case GeCommand::GE_COMMAND_CBP:
+            logger->debug("CBP (address: {:06X})", list_command.param);
+            rasterizer::set_clut_base_lo(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_CBW: {
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+
+            logger->debug("CBW (address: {:08X})", addr_hi);
+            rasterizer::set_clut_base_hi(addr_hi);
+            break;
+        }
+        case GeCommand::GE_COMMAND_XBP1:
+            logger->debug("XBP1 (address: {:06X})", list_command.param);
+            rasterizer::set_source_buffer_base(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_XBW1: {
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+            const u32 width = list_command.param & 0x3FF;
+
+            logger->debug("XBW1 (address: {:08X}, width: {})", addr_hi, width);
+            rasterizer::set_source_buffer_width(addr_hi, width);
+            break;
+        }
+        case GeCommand::GE_COMMAND_XBP2:
+            logger->debug("XBP2 (address: {:06X})", list_command.param);
+            rasterizer::set_destination_buffer_base(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_XBW2: {
+            const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
+            const u32 width = list_command.param & 0x3FF;
+
+            logger->debug("XBW2 (address: {:08X}, width: {})", addr_hi, width);
+            rasterizer::set_destination_buffer_width(addr_hi, width);
+            break;
+        }
+        case GeCommand::GE_COMMAND_TSIZE0:
+        case GeCommand::GE_COMMAND_TSIZE1:
+        case GeCommand::GE_COMMAND_TSIZE2:
+        case GeCommand::GE_COMMAND_TSIZE3:
+        case GeCommand::GE_COMMAND_TSIZE4:
+        case GeCommand::GE_COMMAND_TSIZE5:
+        case GeCommand::GE_COMMAND_TSIZE6:
+        case GeCommand::GE_COMMAND_TSIZE7: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_TSIZE0;
+
+            const u32 width  = (list_command.param >> 0) & 0xF;
+            const u32 height = (list_command.param >> 8) & 0xF;
+
+            logger->debug("TSIZE{} (width: {}, height: {})", idx, width, height);
+            rasterizer::set_texture_size(idx, width, height);
+            break;
+        }
+        case GeCommand::GE_COMMAND_TMAP:
+            logger->debug("TMAP");
+            rasterizer::set_texture_mapping_mode(list_command.param & 3);
+            break;
+        case GeCommand::GE_COMMAND_TSHADE:
+            logger->debug("TSHADE");
+            rasterizer::set_shade_mapping(list_command.param & 3, (list_command.param >> 8) & 3);
+            break;
+        case GeCommand::GE_COMMAND_TMODE:
+            logger->debug("TMODE");
+            rasterizer::set_fast_mode((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_TPF:
+            logger->debug("TPF");
+            rasterizer::set_texture_format(list_command.param & 0xF);
+            break;
+        case GeCommand::GE_COMMAND_CLOAD: {
+            const u32 num_palettes = list_command.param & 0x3F;
+
+            logger->debug("CLOAD (NP: {})", num_palettes);
+            rasterizer::load_clut(num_palettes);
+            break;
+        }
+        case GeCommand::GE_COMMAND_CLUT:
+            logger->debug("CLUT");
+            rasterizer::set_clut(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_TFUNC:
+            logger->debug("TFUNC");
+            rasterizer::set_texture_blend_params(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_TEC:
+            logger->debug("TEC");
+            rasterizer::set_texture_env_color(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_TFLUSH:
+            logger->debug("TFLUSH");
+            break;
+        case GeCommand::GE_COMMAND_TSYNC:
+            logger->debug("TSYNC");
+            break;
+        case GeCommand::GE_COMMAND_CMODE:
+            logger->debug("CMODE");
+            rasterizer::set_clear_mode(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_SCISSOR1:
+            logger->debug("SCISSOR1");
+            rasterizer::set_scissor_upper(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_SCISSOR2:
+            logger->debug("SCISSOR2");
+            rasterizer::set_scissor_lower(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_MINZ:
+            logger->debug("MINZ");
+            rasterizer::set_minimum_depth(list_command.param & 0xFFFF);
+            break;
+        case GeCommand::GE_COMMAND_MAXZ:
+            logger->debug("MAXZ");
+            rasterizer::set_maximum_depth(list_command.param & 0xFFFF);
+            break;
+        case GeCommand::GE_COMMAND_ATEST:
+            logger->debug("ATEST");
+            rasterizer::set_alpha_test(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_ZTEST:
+            logger->debug("ZTEST");
+            rasterizer::set_depth_test(list_command.param & 7);
+            break;
+        case GeCommand::GE_COMMAND_BLEND:
+            logger->debug("BLEND");
+            rasterizer::set_blend_params(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_FIXA:
+            logger->debug("FIXA");
+            rasterizer::set_fixed_color_a(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_FIXB:
+            logger->debug("FIXB");
+            rasterizer::set_fixed_color_b(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_DITH1:
+        case GeCommand::GE_COMMAND_DITH2:
+        case GeCommand::GE_COMMAND_DITH3:
+        case GeCommand::GE_COMMAND_DITH4: {
+            const int idx = list_command.command - GeCommand::GE_COMMAND_DITH1;
+
+            logger->debug("DITH{}", idx + 1);
+            rasterizer::set_dither_matrix(idx, list_command.param);
+            break;
+        }
+        case GeCommand::GE_COMMAND_ZMSK:
+            logger->debug("ZMSK");
+            rasterizer::set_depth_mask_enable((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_PMSK1:
+            logger->debug("PMSK1");
+            rasterizer::set_color_mask(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_PMSK2:
+            logger->debug("PMSK2");
+            rasterizer::set_alpha_mask(list_command.param & 0xFF);
+            break;
+        case GeCommand::GE_COMMAND_XSTART:
+            logger->debug("XSTART");
+            rasterizer::start_transfer((list_command.param & 1) != 0);
+            break;
+        case GeCommand::GE_COMMAND_XPOS1:
+            logger->debug("XPOS1");
+            rasterizer::set_source_buffer_start(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_XPOS2:
+            logger->debug("XPOS2");
+            rasterizer::set_destination_buffer_start(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_XSIZE:
+            logger->debug("XSIZE");
+            rasterizer::set_transfer_size(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_DUMMY:
+            logger->debug("DUMMY");
+            break;
+        default:
+            logger->warn("Unimplemented command {:02X} ({:08X})", list_command.command, list_command.raw);
+            break;
+    }
+
+    return true;
+}
+
+// Returns somewhat nonsensical cycle values that still allow us to step the GE list in chunks
+static i64 get_command_cycles(const ListCommand list_command) {
+    switch (list_command.command) {
+        case GeCommand::GE_COMMAND_PRIM:
+            return (list_command.param & 0xFFFF) + 1;
+        case GeCommand::GE_COMMAND_BEZIER:
+        case GeCommand::GE_COMMAND_SPLINE:
+            return 32;
+        default:
+            return 1;
+    }
+}
+
+static void start_list_exec();
+
+static void schedule_resume() {
+    ctx.list_exec_pending = true;
+
+    if (event_id == scheduler::NO_EVENT_ID) {
+        event_id = scheduler::register_event("GE");
+    }
+
+    scheduler::schedule_event(
+        event_id,
+        [](const int) {
+            ctx.list_exec_pending = false;
+
+            ctx.cycles += MAX_GE_CYCLES;
+
+            start_list_exec();
+        },
+        0,
+        GE_RESUME_DELAY,
+        true
+    );
+}
+
 static void start_list_exec() {
     bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
-    if (!HW_GE_LISTSTAT.busy) {
-        logger->debug("List processing disabled");
+    if (!HW_GE_LISTSTAT.busy || ctx.list_exec_pending) {
         return;
     }
 
-    while ((HW_GE_STALLADDR == 0) || (HW_GE_LISTADDR < HW_GE_STALLADDR)) {
+    while ((HW_GE_STALLADDR == 0) || ((HW_GE_LISTADDR & 0x1FFFFFFF) < HW_GE_STALLADDR)) {
+        if (ctx.cycles <= 0) {
+            schedule_resume();
+            return;
+        }
+        
         const ListCommand list_command = { .raw = bus->read<u32>(HW_GE_LISTADDR & 0x1FFFFFFF) };
 
         // Update command array
@@ -394,647 +1089,22 @@ static void start_list_exec() {
 
         HW_GE_LISTADDR += sizeof(list_command);
 
-        switch (list_command.command) {
-            case GeCommand::GE_COMMAND_NOP:
-                logger->debug("NOP");
-                break;
-            case GeCommand::GE_COMMAND_VADR:
-                rasterizer::set_vertex_addr((list_command.param | rasterizer::get_base()) + HW_GE_ORGADDR0);
-
-                logger->debug("VADR (address: {:08X})", rasterizer::get_vertex_addr());
-                break;
-            case GeCommand::GE_COMMAND_IADR:
-                rasterizer::set_index_addr((list_command.param | rasterizer::get_base()) + HW_GE_ORGADDR0);
-
-                logger->debug("IADR (address: {:08X})", rasterizer::get_index_addr());
-                break;
-            case GeCommand::GE_COMMAND_PRIM: {
-                const u32 count = (list_command.param >> 0) & 0xFFFF;
-                const u32 prim_type = (list_command.param >> 16) & 7;
-
-                logger->debug("PRIM (count: {})", count);
-
-                rasterizer::draw_primitive(count, prim_type);
-                break;
-            }
-            case GeCommand::GE_COMMAND_BEZIER: {
-                const u32 u_count = (list_command.param >> 0) & 0xFF;
-                const u32 v_count = (list_command.param >> 8) & 0xFF;
-
-                logger->debug("BEZIER (U count: {}, V count: {})", u_count, v_count);
-
-                rasterizer::draw_bezier(u_count, v_count);
-                break;
-            }
-            case GeCommand::GE_COMMAND_SPLINE: {
-                const u32 u_count = (list_command.param >> 0) & 0xFF;
-                const u32 v_count = (list_command.param >> 8) & 0xFF;
-
-                const u32 u_knot_type = (list_command.param >> 16) & 3;
-                const u32 v_knot_type = (list_command.param >> 18) & 3;
-
-                logger->debug("SPLINE (U count: {}, V count: {})", list_command.param & 0xFF, (list_command.param >> 8) & 0xFF);
-                
-                rasterizer::draw_spline(u_count, v_count, u_knot_type, v_knot_type);
-                break;
-            }
-            case GeCommand::GE_COMMAND_JUMP:
-                HW_GE_LISTADDR = (rasterizer::get_base() | list_command.param) + HW_GE_ORGADDR0;
-
-                logger->debug("JUMP (address: {:08X})", HW_GE_LISTADDR);
-                break;
-            case GeCommand::GE_COMMAND_BJUMP:
-                logger->error("Unimplemented BJUMP");
-                exit(1);
-            case GeCommand::GE_COMMAND_CALL: {
-                switch (HW_GE_LISTSTAT.depth) {
-                    case 0:
-                        HW_GE_LINKADDR0 = HW_GE_LISTADDR;
-                        HW_GE_ORGADDR1  = HW_GE_ORGADDR0;
-                        HW_GE_LISTSTAT.depth = 1;
-                        break;
-                    case 1:
-                        HW_GE_LINKADDR1 = HW_GE_LISTADDR;
-                        HW_GE_ORGADDR2  = HW_GE_ORGADDR0;
-                        HW_GE_LISTSTAT.depth = 3;
-                        break;
-                    default:
-                        logger->error("Invalid CALL depth");
-                        exit(1);
-                }
-
-                HW_GE_LISTADDR = (rasterizer::get_base() | list_command.param) + HW_GE_ORGADDR0;
-
-                logger->debug("CALL (address: {:08X})", HW_GE_LISTADDR);
-                break;
-            }
-            case GeCommand::GE_COMMAND_RET: {
-                switch (HW_GE_LISTSTAT.depth) {
-                    case 1:
-                        HW_GE_LISTADDR = HW_GE_LINKADDR0;
-                        HW_GE_ORGADDR0 = HW_GE_ORGADDR1;
-                        HW_GE_LISTSTAT.depth = 0;
-                        break;
-                    case 3:
-                        HW_GE_LISTADDR = HW_GE_LINKADDR1;
-                        HW_GE_ORGADDR0 = HW_GE_ORGADDR2;
-                        HW_GE_LISTSTAT.depth = 1;
-                        break;
-                    default:
-                        logger->error("Invalid RET depth");
-                        exit(1);
-                }
-
-                logger->debug("RET (address: {:08X})", HW_GE_LISTADDR);
-                break;
-            }
-            case GeCommand::GE_COMMAND_END:
-                logger->debug("END");
-
-                HW_GE_LISTSTAT.busy = false;
-
-                assert_interrupt(1);
-                return;
-            case GeCommand::GE_COMMAND_SIGNAL:
-                logger->debug("SIGNAL");
-
-                assert_interrupt(0);
-                break;
-            case GeCommand::GE_COMMAND_FINISH:
-                logger->debug("FINISH");
-
-                assert_interrupt(2);
-                break;
-            case GeCommand::GE_COMMAND_BASE:
-                rasterizer::set_base((list_command.param & 0xFF0000) << 8);
-
-                logger->debug("BASE (address: {:08X})", rasterizer::get_base());
-                break;
-            case GeCommand::GE_COMMAND_VTYPE:
-                logger->debug("VTYPE");
-                rasterizer::set_vertex_type(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_OFFSET:
-                HW_GE_ORGADDR0 = list_command.param << 8;
-
-                logger->debug("OFFSET (address: {:08X})", HW_GE_ORGADDR0);
-                break;
-            case GeCommand::GE_COMMAND_ORIGIN:
-                HW_GE_ORGADDR0 = HW_GE_LISTADDR - sizeof(u32);
-
-                logger->debug("ORIGIN (address: {:08X})", HW_GE_ORGADDR0);
-                break;
-            case GeCommand::GE_COMMAND_REGION1:
-                logger->debug("REGION1");
-                rasterizer::set_region_upper(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_REGION2:
-                logger->debug("REGION2");
-                rasterizer::set_region_lower(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_LTE:
-                logger->debug("LTE");
-                rasterizer::set_lighting_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_LE0:
-            case GeCommand::GE_COMMAND_LE1:
-            case GeCommand::GE_COMMAND_LE2:
-            case GeCommand::GE_COMMAND_LE3: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_LE0;
-
-                logger->debug("LE{}", idx);
-                rasterizer::set_light_enable(idx, (list_command.param & 1) != 0);
-                break;
-            }
-            case GeCommand::GE_COMMAND_CLE:
-                logger->debug("CLE");
-                rasterizer::set_clipping_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_BCE:
-                logger->debug("BCE");
-                rasterizer::set_backface_culling_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_TME:
-                logger->debug("TME");
-                rasterizer::set_texture_mapping_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_FGE:
-                logger->debug("FGE");
-                rasterizer::set_fogging_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_DTE:
-                logger->debug("DTE");
-                rasterizer::set_dithering_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_ABE:
-                logger->debug("ABE");
-                rasterizer::set_alpha_blending_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_ATE:
-                logger->debug("ATE");
-                rasterizer::set_alpha_test_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_ZTE:
-                logger->debug("ZTE");
-                rasterizer::set_depth_test_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_STE:
-                logger->debug("STE");
-                rasterizer::set_stencil_test_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_AAE:
-                logger->debug("AAE");
-                rasterizer::set_antialiasing_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_PCE:
-                logger->debug("PCE");
-                rasterizer::set_patch_culling_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_CTE:
-                logger->debug("CTE");
-                rasterizer::set_color_test_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_LOE:
-                logger->debug("LOE");
-                rasterizer::set_logic_operation_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_BONEN:
-                logger->debug("BONEN");
-
-                ctx.bone_matrices.idx = list_command.param & 0x7F;
-                break;
-            case GeCommand::GE_COMMAND_BONED: {
-                assert(ctx.bone_matrices.idx < (NUM_BONES * BONE_SIZE));
-
-                const u32 bone_num = ctx.bone_matrices.idx / 12;
-                const u32 bone_idx = ctx.bone_matrices.idx % 12;
-
-                ctx.bone_matrices.data[bone_num][bone_idx] = from_u32(list_command.param << 8);
-                ctx.bone_matrices.idx++;
-
-                logger->debug("BONED (BONE{}{}: {})", (char)('A' + bone_num), bone_idx, ctx.bone_matrices.data[bone_num][bone_idx]);
-                break;
-            }
-            case GeCommand::GE_COMMAND_WEIGHT0:
-            case GeCommand::GE_COMMAND_WEIGHT1:
-            case GeCommand::GE_COMMAND_WEIGHT2:
-            case GeCommand::GE_COMMAND_WEIGHT3:
-            case GeCommand::GE_COMMAND_WEIGHT4:
-            case GeCommand::GE_COMMAND_WEIGHT5:
-            case GeCommand::GE_COMMAND_WEIGHT6:
-            case GeCommand::GE_COMMAND_WEIGHT7: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_WEIGHT0;
-
-                logger->debug("WEIGHT{}", idx);
-                rasterizer::set_morph_weight(idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_DIVIDE: {
-                const u32 u_div = (list_command.param >> 0) & 0x7F;
-                const u32 v_div = (list_command.param >> 8) & 0x7F;
-
-                logger->debug("DIVIDE (U division: {}, V division: {})", u_div, v_div);
-                rasterizer::set_patch_division(u_div, v_div);
-                break;
-            }
-            case GeCommand::GE_COMMAND_PPM:
-                logger->debug("PPM");
-                rasterizer::set_patch_primitive(list_command.param & 3);
-                break;
-            case GeCommand::GE_COMMAND_PFACE:
-                logger->debug("PFACE");
-                rasterizer::set_patch_face((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_WORLDN:
-                logger->debug("WORLDN");
-
-                ctx.world_matrix.idx = list_command.param & 0xF;
-                break;
-            case GeCommand::GE_COMMAND_WORLDD:
-                assert(ctx.world_matrix.idx < WORLD_SIZE);
-
-                ctx.world_matrix.data[ctx.world_matrix.idx++] = from_u32(list_command.param << 8);
-
-                logger->debug("WORLDD (WORLD{}: {})", ctx.world_matrix.idx - 1, ctx.world_matrix.data[ctx.world_matrix.idx - 1]);
-
-                if (ctx.world_matrix.idx >= WORLD_SIZE) {
-                    ctx.world_matrix.idx = 0;
-                }
-                break;
-            case GeCommand::GE_COMMAND_VIEWN:
-                logger->debug("VIEWN");
-
-                ctx.view_matrix.idx = list_command.param & 0xF;
-                break;
-            case GeCommand::GE_COMMAND_VIEWD:
-                assert(ctx.view_matrix.idx < VIEW_SIZE);
-
-                ctx.view_matrix.data[ctx.view_matrix.idx++] = from_u32(list_command.param << 8);
-
-                logger->debug("VIEWD (VIEW{}: {})", ctx.view_matrix.idx - 1, ctx.view_matrix.data[ctx.view_matrix.idx - 1]);
-
-                // Unsure if this is how it works
-                if (ctx.view_matrix.idx >= VIEW_SIZE) {
-                    ctx.view_matrix.idx = 0;
-                }
-                break;
-            case GeCommand::GE_COMMAND_PROJN:
-                logger->debug("PROJN");
-
-                ctx.perspective_matrix.idx = list_command.param & 0xF;
-                break;
-            case GeCommand::GE_COMMAND_PROJD:
-                assert(ctx.perspective_matrix.idx < PROJ_SIZE);
-
-                ctx.perspective_matrix.data[ctx.perspective_matrix.idx++] = from_u32(list_command.param << 8);
-
-                logger->debug("PROJD (PROJ{}: {})", ctx.perspective_matrix.idx - 1, ctx.perspective_matrix.data[ctx.perspective_matrix.idx - 1]);
-
-                // Unsure if this is how it works
-                if (ctx.perspective_matrix.idx >= PROJ_SIZE) {
-                    ctx.perspective_matrix.idx = 0;
-                }
-                break;
-            case GeCommand::GE_COMMAND_TGENN:
-                logger->debug("TGENN");
-
-                ctx.texgen_matrix.idx = list_command.param & 0xF;
-                break;
-            case GeCommand::GE_COMMAND_TGEND:
-                assert(ctx.texgen_matrix.idx < TGEN_SIZE);
-
-                ctx.texgen_matrix.data[ctx.texgen_matrix.idx++] = from_u32(list_command.param << 8);
-
-                logger->debug("TGEND (TGEN{}: {})", ctx.texgen_matrix.idx - 1, ctx.texgen_matrix.data[ctx.texgen_matrix.idx - 1]);
-
-                // Unsure if this is how it works
-                if (ctx.texgen_matrix.idx >= TGEN_SIZE) {
-                    ctx.texgen_matrix.idx = 0;
-                }
-                break;
-            case GeCommand::GE_COMMAND_SX:
-            case GeCommand::GE_COMMAND_SY:
-            case GeCommand::GE_COMMAND_SZ: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_SX;
-
-                logger->debug("S{}", (char)('X' + idx));
-                rasterizer::set_viewport_scale(idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_TX:
-            case GeCommand::GE_COMMAND_TY:
-            case GeCommand::GE_COMMAND_TZ: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_TX;
-
-                logger->debug("T{}", (char)('X' + idx));
-                rasterizer::set_viewport_offset(idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_SU:
-            case GeCommand::GE_COMMAND_SV: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_SU;
-
-                logger->debug("S{}", (char)('U' + idx));
-                rasterizer::set_texture_scale(idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_TU:
-            case GeCommand::GE_COMMAND_TV: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_TU;
-
-                logger->debug("T{}", (char)('U' + idx));
-                rasterizer::set_texture_offset(idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_OFFSETX:
-                logger->debug("OFFSETX");
-                rasterizer::set_offset_x((f32)(u16)list_command.param / 16);
-                break;
-            case GeCommand::GE_COMMAND_OFFSETY:
-                logger->debug("OFFSETY");
-                rasterizer::set_offset_y((f32)(u16)list_command.param / 16);
-                break;
-            case GeCommand::GE_COMMAND_SHADE:
-                logger->debug("SHADE");
-                rasterizer::set_gouraud_shading_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_MEC:
-            case GeCommand::GE_COMMAND_MAC:
-            case GeCommand::GE_COMMAND_MDC:
-            case GeCommand::GE_COMMAND_MSC: {
-                constexpr char MODEL_COLOR[] = { 'E', 'A', 'D', 'S' };
-
-                const int idx = list_command.command - GeCommand::GE_COMMAND_MEC;
-
-                logger->debug("M{}C: {:06X}", MODEL_COLOR[idx], list_command.param);
-                rasterizer::set_model_color(idx, list_command.param);
-                break;
-            }
-            case GeCommand::GE_COMMAND_MAA:
-                logger->debug("MAA: {:02X}", list_command.param & 0xFF);
-                rasterizer::set_model_alpha(list_command.param & 0xFF);
-                break;
-            case GeCommand::GE_COMMAND_AC:
-                logger->debug("AC: {:06X}", list_command.param);
-                rasterizer::set_ambient_color(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_AA:
-                logger->debug("AA: {:02X}", list_command.param & 0xFF);
-                rasterizer::set_ambient_alpha(list_command.param & 0xFF);
-                break;
-            case GeCommand::GE_COMMAND_LX0:
-            case GeCommand::GE_COMMAND_LY0:
-            case GeCommand::GE_COMMAND_LZ0:
-            case GeCommand::GE_COMMAND_LX1:
-            case GeCommand::GE_COMMAND_LY1:
-            case GeCommand::GE_COMMAND_LZ1:
-            case GeCommand::GE_COMMAND_LX2:
-            case GeCommand::GE_COMMAND_LY2:
-            case GeCommand::GE_COMMAND_LZ2:
-            case GeCommand::GE_COMMAND_LX3:
-            case GeCommand::GE_COMMAND_LY3:
-            case GeCommand::GE_COMMAND_LZ3: {
-                const int light_idx = (list_command.command - GeCommand::GE_COMMAND_LX0) / 3;
-                const int idx = (list_command.command - GeCommand::GE_COMMAND_LX0) % 3;
-
-                logger->debug("L{}{}", (char)('X' + idx), light_idx);
-                rasterizer::set_light_vector(light_idx, idx, from_u32(list_command.param << 8));
-                break;
-            }
-            case GeCommand::GE_COMMAND_FBP:
-                logger->debug("FBP (address: {:06X})", list_command.param);
-                rasterizer::set_framebuffer_base(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_FBW: {
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x7C0;
-
-                logger->debug("FBW (address: {:08X}, width: {})", addr_hi, width);
-                rasterizer::set_framebuffer_width(width);
-                break;
-            }
-            case GeCommand::GE_COMMAND_ZBP:
-                logger->debug("ZBP (address: {:06X})", list_command.param);
-                rasterizer::set_depth_buffer_base(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_ZBW: {
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x7C0;
-
-                logger->debug("ZBW (address: {:08X}, width: {})", addr_hi, width);
-                rasterizer::set_depth_buffer_width(width);
-                break;
-            }
-            case GeCommand::GE_COMMAND_TBP0:
-            case GeCommand::GE_COMMAND_TBP1:
-            case GeCommand::GE_COMMAND_TBP2:
-            case GeCommand::GE_COMMAND_TBP3:
-            case GeCommand::GE_COMMAND_TBP4:
-            case GeCommand::GE_COMMAND_TBP5:
-            case GeCommand::GE_COMMAND_TBP6:
-            case GeCommand::GE_COMMAND_TBP7: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_TBP0;
-
-                logger->debug("TBP{} (address: {:06X})", idx, list_command.param);
-                rasterizer::set_texture_base(idx, list_command.param);
-                break;
-            }
-            case GeCommand::GE_COMMAND_TBW0:
-            case GeCommand::GE_COMMAND_TBW1:
-            case GeCommand::GE_COMMAND_TBW2:
-            case GeCommand::GE_COMMAND_TBW3:
-            case GeCommand::GE_COMMAND_TBW4:
-            case GeCommand::GE_COMMAND_TBW5:
-            case GeCommand::GE_COMMAND_TBW6:
-            case GeCommand::GE_COMMAND_TBW7: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_TBW0;
-
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x7FF;
-
-                logger->debug("TBW{} (address: {:08X}, width: {})", idx, addr_hi, width);
-                rasterizer::set_texture_buffer_width(idx, addr_hi, width);
-                break;
-            }
-            case GeCommand::GE_COMMAND_CBP:
-                logger->debug("CBP (address: {:06X})", list_command.param);
-                rasterizer::set_clut_base_lo(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_CBW: {
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-
-                logger->debug("CBW (address: {:08X})", addr_hi);
-                rasterizer::set_clut_base_hi(addr_hi);
-                break;
-            }
-            case GeCommand::GE_COMMAND_XBP1:
-                logger->debug("XBP1 (address: {:06X})", list_command.param);
-                rasterizer::set_source_buffer_base(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_XBW1: {
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x3FF;
-
-                logger->debug("XBW1 (address: {:08X}, width: {})", addr_hi, width);
-                rasterizer::set_source_buffer_width(addr_hi, width);
-                break;
-            }
-            case GeCommand::GE_COMMAND_XBP2:
-                logger->debug("XBP2 (address: {:06X})", list_command.param);
-                rasterizer::set_destination_buffer_base(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_XBW2: {
-                const u32 addr_hi = (list_command.param & 0xFF0000) << 8;
-                const u32 width = list_command.param & 0x3FF;
-
-                logger->debug("XBW2 (address: {:08X}, width: {})", addr_hi, width);
-                rasterizer::set_destination_buffer_width(addr_hi, width);
-                break;
-            }
-            case GeCommand::GE_COMMAND_TSIZE0:
-            case GeCommand::GE_COMMAND_TSIZE1:
-            case GeCommand::GE_COMMAND_TSIZE2:
-            case GeCommand::GE_COMMAND_TSIZE3:
-            case GeCommand::GE_COMMAND_TSIZE4:
-            case GeCommand::GE_COMMAND_TSIZE5:
-            case GeCommand::GE_COMMAND_TSIZE6:
-            case GeCommand::GE_COMMAND_TSIZE7: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_TSIZE0;
-
-                const u32 width  = (list_command.param >> 0) & 0xF;
-                const u32 height = (list_command.param >> 8) & 0xF;
-
-                logger->debug("TSIZE{} (width: {}, height: {})", idx, width, height);
-                rasterizer::set_texture_size(idx, width, height);
-                break;
-            }
-            case GeCommand::GE_COMMAND_TMAP:
-                logger->debug("TMAP");
-                rasterizer::set_texture_mapping_mode(list_command.param & 3);
-                break;
-            case GeCommand::GE_COMMAND_TSHADE:
-                logger->debug("TSHADE");
-                rasterizer::set_shade_mapping(list_command.param & 3, (list_command.param >> 8) & 3);
-                break;
-            case GeCommand::GE_COMMAND_TMODE:
-                logger->debug("TMODE");
-                rasterizer::set_fast_mode((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_TPF:
-                logger->debug("TPF");
-                rasterizer::set_texture_format(list_command.param & 0xF);
-                break;
-            case GeCommand::GE_COMMAND_CLOAD: {
-                const u32 num_palettes = list_command.param & 0x3F;
-
-                logger->debug("CLOAD (NP: {})", num_palettes);
-                rasterizer::load_clut(num_palettes);
-                break;
-            }
-            case GeCommand::GE_COMMAND_CLUT:
-                logger->debug("CLUT");
-                rasterizer::set_clut(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_TFUNC:
-                logger->debug("TFUNC");
-                rasterizer::set_texture_blend_params(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_TEC:
-                logger->debug("TEC");
-                rasterizer::set_texture_env_color(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_TFLUSH:
-                logger->debug("TFLUSH");
-                break;
-            case GeCommand::GE_COMMAND_TSYNC:
-                logger->debug("TSYNC");
-                break;
-            case GeCommand::GE_COMMAND_CMODE:
-                logger->debug("CMODE");
-                rasterizer::set_clear_mode(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_SCISSOR1:
-                logger->debug("SCISSOR1");
-                rasterizer::set_scissor_upper(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_SCISSOR2:
-                logger->debug("SCISSOR2");
-                rasterizer::set_scissor_lower(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_MINZ:
-                logger->debug("MINZ");
-                rasterizer::set_minimum_depth(list_command.param & 0xFFFF);
-                break;
-            case GeCommand::GE_COMMAND_MAXZ:
-                logger->debug("MAXZ");
-                rasterizer::set_maximum_depth(list_command.param & 0xFFFF);
-                break;
-            case GeCommand::GE_COMMAND_ATEST:
-                logger->debug("ATEST");
-                rasterizer::set_alpha_test(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_ZTEST:
-                logger->debug("ZTEST");
-                rasterizer::set_depth_test(list_command.param & 7);
-                break;
-            case GeCommand::GE_COMMAND_BLEND:
-                logger->debug("BLEND");
-                rasterizer::set_blend_params(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_FIXA:
-                logger->debug("FIXA");
-                rasterizer::set_fixed_color_a(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_FIXB:
-                logger->debug("FIXB");
-                rasterizer::set_fixed_color_b(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_DITH1:
-            case GeCommand::GE_COMMAND_DITH2:
-            case GeCommand::GE_COMMAND_DITH3:
-            case GeCommand::GE_COMMAND_DITH4: {
-                const int idx = list_command.command - GeCommand::GE_COMMAND_DITH1;
-
-                logger->debug("DITH{}", idx + 1);
-                rasterizer::set_dither_matrix(idx, list_command.param);
-                break;
-            }
-            case GeCommand::GE_COMMAND_ZMSK:
-                logger->debug("ZMSK");
-                rasterizer::set_depth_mask_enable((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_PMSK1:
-                logger->debug("PMSK1");
-                rasterizer::set_color_mask(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_PMSK2:
-                logger->debug("PMSK2");
-                rasterizer::set_alpha_mask(list_command.param & 0xFF);
-                break;
-            case GeCommand::GE_COMMAND_XSTART:
-                logger->debug("XSTART");
-                rasterizer::start_transfer((list_command.param & 1) != 0);
-                break;
-            case GeCommand::GE_COMMAND_XPOS1:
-                logger->debug("XPOS1");
-                rasterizer::set_source_buffer_start(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_XPOS2:
-                logger->debug("XPOS2");
-                rasterizer::set_destination_buffer_start(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_XSIZE:
-                logger->debug("XSIZE");
-                rasterizer::set_transfer_size(list_command.param);
-                break;
-            case GeCommand::GE_COMMAND_DUMMY:
-                logger->debug("DUMMY");
-                break;
-            default:
-                logger->warn("Unimplemented command {:02X} ({:08X})", list_command.command, list_command.raw);
-                break;
+        // The name is a bit ill-fitting, but it's fine...
+        if (!start_command(list_command)) {
+            return;
         }
+
+        ctx.cycles -= get_command_cycles(list_command);
     }
+}
+
+static void end_list_exec() {
+    HW_GE_LISTSTAT.busy = false;
+ 
+    assert_interrupt(1);
+
+    ctx.list_exec_pending = false;
+    ctx.cycles = MAX_GE_CYCLES;
 }
 
 static u32 read(const u32 addr) {
@@ -1052,27 +1122,27 @@ static u32 read(const u32 addr) {
         const u32 bone_idx = idx % 12;
 
         logger->debug("BONE{}{} read32", (char)('A' + bone_num), bone_idx);
-        return from_f32(ctx.bone_matrices.data[bone_num][bone_idx]);
+        return from_f32(ctx.bone_matrices.data[bone_num][bone_idx]) >> 8;
     } else if ((addr >= IoAddress::IO_ADDRESS_WORLDMTX) && (addr < IoAddress::IO_ADDRESS_VIEWMTX)) {
         const u32 idx = (addr - IoAddress::IO_ADDRESS_WORLDMTX) / sizeof(u32);
 
         logger->debug("WORLD{} read32", idx);
-        return from_f32(ctx.world_matrix.data[idx]);
+        return from_f32(ctx.world_matrix.data[idx]) >> 8;
     } else if ((addr >= IoAddress::IO_ADDRESS_VIEWMTX) && (addr < IoAddress::IO_ADDRESS_PROJMTX)) {
         const u32 idx = (addr - IoAddress::IO_ADDRESS_VIEWMTX) / sizeof(u32);
 
         logger->debug("VIEW{} read32", idx);
-        return from_f32(ctx.view_matrix.data[idx]);
+        return from_f32(ctx.view_matrix.data[idx]) >> 8;
     } else if ((addr >= IoAddress::IO_ADDRESS_PROJMTX) && (addr < IoAddress::IO_ADDRESS_TGENMTX)) {
         const u32 idx = (addr - IoAddress::IO_ADDRESS_PROJMTX) / sizeof(u32);
 
         logger->debug("PROJ{} read32", idx);
-        return from_f32(ctx.perspective_matrix.data[idx]);
+        return from_f32(ctx.perspective_matrix.data[idx]) >> 8;
     } else if ((addr >= IoAddress::IO_ADDRESS_TGENMTX) && (addr < IoAddress::IO_ADDRESS_COUNTMTX)) {
         const u32 idx = (addr - IoAddress::IO_ADDRESS_TGENMTX) / sizeof(u32);
 
         logger->debug("TGEN{} read32", idx);
-        return from_f32(ctx.texgen_matrix.data[idx]);
+        return from_f32(ctx.texgen_matrix.data[idx]) >> 8;
     }
 
     switch (addr) {
@@ -1147,7 +1217,7 @@ static void write(const u32 addr, const u32 data) {
         case IoAddress::IO_ADDRESS_STALLADDR:
             logger->debug("STALLADDR write32 = {:08X}", data);
 
-            HW_GE_STALLADDR = data;
+            HW_GE_STALLADDR = data & 0x1FFFFFFF;
 
             start_list_exec();
             break;
@@ -1224,7 +1294,7 @@ void initialize() {
 }
 
 void soft_reset() {
-    
+    ctx.cycles = MAX_GE_CYCLES;
 }
 
 void hard_reset() {
@@ -1235,6 +1305,8 @@ void hard_reset() {
     };
 
     kanacore::get_sc_bus_ptr()->map(GE_ADDR, GE_SIZE, page_desc);
+
+    soft_reset();
 }
 
 void shutdown() {
