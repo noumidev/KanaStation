@@ -36,6 +36,8 @@ inline common::i64 from_microseconds(const common::i64 ms) {
     return ms * ONE_MICROSECOND;
 }
 
+common::i64 get_global_timestamp();
+
 common::u32 register_event(const char* name);
 
 void schedule_event(

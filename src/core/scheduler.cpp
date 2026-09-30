@@ -65,6 +65,10 @@ void shutdown() {
 
 }
 
+i64 get_global_timestamp() {
+    return global_timestamp;
+}
+
 u32 register_event(const char* name) {
     static u32 id_pool = 0;
 
