@@ -14,8 +14,8 @@ void soft_reset();
 void hard_reset();
 void shutdown();
 
-void assert_audio_dma_request();
-void clear_audio_dma_request();
+void assert_audio_dma_request(const int chan_id);
+void clear_audio_dma_request(const int chan_id);
 
 void assert_ms_dma_request();
 void clear_ms_dma_request();

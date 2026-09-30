@@ -143,9 +143,11 @@ static struct {
     int ms_dma_controller;
     int ms_dma_chan;
 
-    bool audio_dma_request;
-    int audio_dma_controller;
-    int audio_dma_chan;
+    struct {
+        bool dma_request;
+        int dma_controller;
+        int dma_chan;
+    } audio_channels[2];
 } ctx;
 
 std::array<Dmac, NUM_DMACS> dmacs;
@@ -183,6 +185,7 @@ static void assert_terminal_count_interrupt(const u32 channel, const bool mask) 
 enum Peripheral {
     PERIPHERAL_MS        = 1,
     PERIPHERAL_AUDIO_OUT = 5,
+    PERIPHERAL_AUDIO_SRC = 6,
 };
 
 template<int dmac_num>
@@ -197,13 +200,18 @@ static void bind_peripheral_request(const int chan_idx, const bool** request, co
             ctx.ms_dma_chan = chan_idx;
             break;
         case Peripheral::PERIPHERAL_AUDIO_OUT:
-            assert((ctx.audio_dma_controller == -1) || (ctx.audio_dma_controller == dmac_num));
-            assert((ctx.audio_dma_chan == -1) || (ctx.audio_dma_chan == chan_idx));
-            *request = &ctx.audio_dma_request;
+        case Peripheral::PERIPHERAL_AUDIO_SRC: {
+            auto& audio_chan = ctx.audio_channels[peripheral - Peripheral::PERIPHERAL_AUDIO_OUT];
 
-            ctx.audio_dma_controller = dmac_num;
-            ctx.audio_dma_chan = chan_idx;
+            assert((audio_chan.dma_controller == -1) || (audio_chan.dma_controller == dmac_num));
+            assert((audio_chan.dma_chan == -1) || (audio_chan.dma_chan == chan_idx));
+
+            *request = &audio_chan.dma_request;
+
+            audio_chan.dma_controller = dmac_num;
+            audio_chan.dma_chan = chan_idx;
             break;
+        }
         default:
             dmacs[dmac_num].logger->error("Unimplemented peripheral request {}", peripheral);
             exit(1);
@@ -214,9 +222,11 @@ template<int dmac_num>
 static void unbind_peripheral_request(const int chan_idx) {
     static_assert(dmac_num < NUM_DMACS);
 
-    if ((ctx.audio_dma_controller == dmac_num) && (ctx.audio_dma_chan == chan_idx)) {
-        ctx.audio_dma_controller = -1;
-        ctx.audio_dma_chan = -1;
+    for (auto& audio_chan : ctx.audio_channels) {
+        if ((audio_chan.dma_controller == dmac_num) && (audio_chan.dma_chan == chan_idx)) {
+            audio_chan.dma_controller = -1;
+            audio_chan.dma_chan = -1;
+        }
     }
 
     if ((ctx.ms_dma_controller == dmac_num) && (ctx.ms_dma_chan == chan_idx)) {
@@ -535,8 +545,10 @@ void initialize() {
 }
 
 void soft_reset() {
-    ctx.audio_dma_controller = -1;
-    ctx.audio_dma_chan = -1;
+    for (auto& chan : ctx.audio_channels) {
+        chan.dma_controller = -1;
+        chan.dma_chan = -1;
+    }
 }
 
 void hard_reset() {
@@ -550,29 +562,33 @@ void shutdown() {
 
 }
 
-void assert_audio_dma_request() {
-    const bool old_request = ctx.audio_dma_request;
+void assert_audio_dma_request(const int chan_id) {
+    auto& audio_chan = ctx.audio_channels[chan_id];
 
-    ctx.audio_dma_request = true;
+    const bool old_request = audio_chan.dma_request;
 
-    if (!old_request && (ctx.audio_dma_controller != -1) && (ctx.audio_dma_chan != -1)) {
-        Dmac* dmac = &dmacs[ctx.audio_dma_controller];
-        auto* chan = &dmac->channels[ctx.audio_dma_chan];
+    audio_chan.dma_request = true;
+
+    if (!old_request && (audio_chan.dma_controller != -1) && (audio_chan.dma_chan != -1)) {
+        Dmac* dmac = &dmacs[audio_chan.dma_controller];
+        auto* chan = &dmac->channels[audio_chan.dma_chan];
 
         if (!chan->configuration.channel_enable) {
             return;
         }
     
-        if (ctx.audio_dma_controller == 0) {
-            start_transfer<0>(ctx.audio_dma_chan);
-        } else if (ctx.audio_dma_controller == 1) {
-            start_transfer<1>(ctx.audio_dma_chan);
+        if (audio_chan.dma_controller == 0) {
+            start_transfer<0>(audio_chan.dma_chan);
+        } else if (audio_chan.dma_controller == 1) {
+            start_transfer<1>(audio_chan.dma_chan);
         }
     }
 }
 
-void clear_audio_dma_request() {
-    ctx.audio_dma_request = false;
+void clear_audio_dma_request(const int chan_id) {
+    assert(chan_id < 2);
+
+    ctx.audio_channels[chan_id].dma_request = false;
 }
 
 void assert_ms_dma_request() {
