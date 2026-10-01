@@ -117,7 +117,7 @@ public:
             return false;
         }
 
-        file = std::fopen(path, "rb");
+        file = std::fopen(path, "r+b");
 
         if (file == nullptr) {
             return false;
@@ -147,6 +147,7 @@ public:
 
         std::fseek(file, sector * SECTOR_SIZE, SEEK_SET);
         std::fwrite(bytes.data(), sizeof(u8), bytes.size(), file);
+        std::fflush(file);
     }
 };
 
@@ -219,6 +220,7 @@ static struct {
 
     u16 num_sectors;
     u32 lba;
+    bool infinite_write;
 
     // Command 0x8 sets these
     u8 read_idx, read_length;
@@ -368,7 +370,7 @@ static void start_pro_command(const u8 command) {
         case ProCommand::PRO_COMMAND_WRITE:
             logger->debug("PRO_WRITE");
 
-            assert(ctx.num_sectors > 0);
+            ctx.infinite_write = ctx.num_sectors == 0;
 
             buf_request = true;
             break;
@@ -384,6 +386,7 @@ static void start_pro_command(const u8 command) {
             break;
         case ProCommand::PRO_COMMAND_STOP:
             logger->debug("PRO_STOP");
+            // We should figure out exactly what STOP does
             break;
         case 0x40:
             logger->warn("Unimplemented PRO command {:02X}", command);
@@ -773,7 +776,10 @@ static u32 read32(const u32 addr) {
                 }
 
                 return data;
-            }   
+            }
+
+            logger->error("Invalid DATA read32");
+            exit(1);
         }
         case IoAddress::IO_ADDRESS_STATUS:
             // logger->debug("STATUS read32");
@@ -862,20 +868,24 @@ static void write32(const u32 addr, const u32 data) {
                 if (ctx.data_count == ctx.data_length) {
                     ctx.data_count = 0;
 
-                    ctx.num_sectors--;
+                    memory_stick.write_sector(sector_buf, ctx.lba);
 
-                    if (ctx.num_sectors == 0) {
-                        HW_MSIF0_STATUS.command_end = 1;
-                        HW_MSIF0_STATUS.dma_request = 0;
-                        HW_MSIF0_STATUS.buf_request = 0;
-
-                        dmac::clear_ms_dma_request();
-
-                        assert_interrupt();
-                    } else {
+                    if (ctx.infinite_write) {
                         ctx.lba++;
+                    } else {
+                        ctx.num_sectors--;
 
-                        memory_stick.write_sector(sector_buf, ctx.lba);
+                        if (ctx.num_sectors == 0) {
+                            HW_MSIF0_STATUS.command_end = 1;
+                            HW_MSIF0_STATUS.dma_request = 0;
+                            HW_MSIF0_STATUS.buf_request = 0;
+
+                            dmac::clear_ms_dma_request();
+
+                            assert_interrupt();
+                        } else {
+                            ctx.lba++;
+                        }
                     }
                 }
 

@@ -20,7 +20,7 @@ Drop the provided `config.toml` in the same folder as the executable and change 
 - Set up all paths. Boot ROM and NAND are required, UMD and Memory Stick are optional.
 
 ## Infos
-- changes to NAND and the Memory Stick are not currently saved
+- changes to NAND are not currently saved. Changes to the Memory Stick image *are* saved, so please make a backup of it before using the emulator
 - the emulator gets very(!!) slow when 3D is used
 - many games and homebrew can't boot yet, and those that do often experience graphical issues, no sound, ...
 - PSP-2000/Slim firmware can't boot yet
