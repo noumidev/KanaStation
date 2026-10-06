@@ -71,6 +71,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_NMIEN:
             logger->debug("NMIEN read32");
             return HW_SYSCTRL_NMIEN;
+        case IoAddress::IO_ADDRESS_RAMSIZE:
+            logger->debug("RAMSIZE read32");
+            return HW_SYSCTRL_RAMSIZE;
         case IoAddress::IO_ADDRESS_BUSCLKEN:
             logger->debug("BUSCLKEN read32");
             return HW_SYSCTRL_BUSCLKEN;
