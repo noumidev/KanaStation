@@ -231,8 +231,18 @@ static void write_reset_enable(u32 data) {
     HW_SYSCTRL_RESETEN = data;
 }
 
-static void assert_rpc_interrupt(const int) {
-    intc::assert_me_interrupt(31);
+static void assert_rpc_interrupt(const int command) {
+    // VIDEO/AUDIOCODEC commands tend to hang or crash the emulator in various ways,
+    // so we skip them for now
+    if (command < 0x100) {
+        intc::assert_sc_interrupt(31);
+
+        bus::Bus* bus = kanacore::get_sc_bus_ptr();
+
+        bus->write<u32>(0x1FC00628, -1);
+    } else {
+        intc::assert_me_interrupt(31);
+    }
 }
 
 static void write(const u32 addr, const u32 data) {
@@ -267,7 +277,7 @@ static void write(const u32 addr, const u32 data) {
                 scheduler::schedule_event(
                     event_id,
                     assert_rpc_interrupt,
-                    0,
+                    command,
                     // For some weird reason, later firmwares send their first RPC interrupt
                     // WAY too early... ME isn't ready to accept them at the time, and so it
                     // discards them. By delaying them by a second, it works... we need to
