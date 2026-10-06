@@ -795,6 +795,10 @@ static bool start_command(const ListCommand list_command) {
             rasterizer::set_light_vector(light_idx, idx, from_u32(list_command.param << 8));
             break;
         }
+        case GeCommand::GE_COMMAND_CULL:
+            logger->debug("CULL (cull mode: {})", list_command.param & 1);
+            rasterizer::set_cull_mode(list_command.param & 1);
+            break;
         case GeCommand::GE_COMMAND_FBP:
             logger->debug("FBP (address: {:06X})", list_command.param);
             rasterizer::set_framebuffer_base(list_command.param);
@@ -928,6 +932,10 @@ static bool start_command(const ListCommand list_command) {
         case GeCommand::GE_COMMAND_CLUT:
             logger->debug("CLUT");
             rasterizer::set_clut(list_command.param);
+            break;
+        case GeCommand::GE_COMMAND_TWRAP:
+            logger->debug("TWRAP");
+            rasterizer::set_texture_wrap_mode((list_command.param & 1) != 0, (list_command.param & 0x100) != 0);
             break;
         case GeCommand::GE_COMMAND_TFUNC:
             logger->debug("TFUNC");

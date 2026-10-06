@@ -61,6 +61,7 @@ void set_light_attenuation_factor(const common::u32 light_idx, const common::u32
 void set_light_convergence_factor(const common::u32 light_idx, const common::f32 data);
 void set_light_cutoff_coefficient(const common::u32 light_idx, const common::f32 data);
 void set_light_color(const common::u32 light_idx, const common::u32 idx, const common::u32 data);
+void set_cull_mode(const common::u32 cull_mode);
 void set_framebuffer_base(const common::u32 addr_lo);
 void set_framebuffer_width(const common::u32 width);
 void set_depth_buffer_base(const common::u32 addr_lo);
@@ -80,6 +81,7 @@ void set_shade_mapping(const common::u32 u_light, const common::u32 v_light);
 void set_texture_format(const common::u32 format);
 void load_clut(const common::u32 num_palettes);
 void set_clut(const common::u32 data);
+void set_texture_wrap_mode(const bool clamp_s, const bool clamp_t);
 void set_texture_blend_params(const common::u32 data);
 void set_texture_env_color(const common::u32 data);
 void set_clear_mode(const common::u32 data);

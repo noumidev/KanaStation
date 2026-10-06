@@ -274,6 +274,10 @@ static struct Context {
     bool logic_operation_enable;
     bool gouraud_shading_enable;
 
+    bool clamp_s, clamp_t;
+
+    u32 cull_mode;
+
     f32 weights[NUM_MORPH_WEIGHTS];
 
     struct Lighting {
@@ -889,6 +893,10 @@ void set_light_color(const u32 light_idx, const u32 idx, const u32 data) {
     logger->debug("Light {} {} color: {:08X}", light_idx, LIGHT_COLOR_NAMES[idx], light_color.raw);
 }
 
+void set_cull_mode(const u32 cull_mode) {
+    ctx.cull_mode = cull_mode;
+}
+
 void set_framebuffer_base(const u32 addr_lo) {
     u32& addr = ctx.framebuffer.addr;
 
@@ -1135,6 +1143,11 @@ void set_clut(const u32 data) {
     );
 }
 
+void set_texture_wrap_mode(const bool clamp_s, const bool clamp_t) {
+    ctx.clamp_s = clamp_s;
+    ctx.clamp_t = clamp_t;
+}
+
 void set_texture_blend_params(const u32 data) {
     auto& blend_params = ctx.tex_blend_params;
 
@@ -1360,37 +1373,31 @@ static void transform_bone(std::vector<Vertex>& vertices) {
     }
 }
 
-static void transform_4d(std::vector<Vertex>& vertices, const f32* matrix) {
-    for (Vertex& vertex : vertices) {
-        const f32 w[4] = {
-            matrix[0] * vertex.x + matrix[4] * vertex.y + matrix[8 ] * vertex.z + matrix[12],
-            matrix[1] * vertex.x + matrix[5] * vertex.y + matrix[9 ] * vertex.z + matrix[13],
-            matrix[2] * vertex.x + matrix[6] * vertex.y + matrix[10] * vertex.z + matrix[14],
-            matrix[3] * vertex.x + matrix[7] * vertex.y + matrix[11] * vertex.z + matrix[15],
-        };
+static void transform_4d(Vertex& vertex, const f32* matrix) {
+    const f32 w[4] = {
+        matrix[0] * vertex.x + matrix[4] * vertex.y + matrix[8 ] * vertex.z + matrix[12],
+        matrix[1] * vertex.x + matrix[5] * vertex.y + matrix[9 ] * vertex.z + matrix[13],
+        matrix[2] * vertex.x + matrix[6] * vertex.y + matrix[10] * vertex.z + matrix[14],
+        matrix[3] * vertex.x + matrix[7] * vertex.y + matrix[11] * vertex.z + matrix[15],
+    };
 
-        vertex.x = w[0];
-        vertex.y = w[1];
-        vertex.z = w[2];
-        vertex.w = w[3];
-    }
+    vertex.x = w[0];
+    vertex.y = w[1];
+    vertex.z = w[2];
+    vertex.w = w[3];
 }
 
-static void viewport_transform(std::vector<Vertex>& vertices) {
-    for (Vertex& vertex : vertices) {
-        const f32 w = vertex.w;
+static void viewport_transform(Vertex& vertex) {
+    const f32 w = vertex.w;
 
-        vertex.x = ctx.viewport_scale[0] * vertex.x / w + ctx.viewport_offset[0];
-        vertex.y = ctx.viewport_scale[1] * vertex.y / w + ctx.viewport_offset[1];
-        vertex.z = ctx.viewport_scale[2] * vertex.z / w + ctx.viewport_offset[2];
-    }
+    vertex.x = ctx.viewport_scale[0] * vertex.x / w + ctx.viewport_offset[0];
+    vertex.y = ctx.viewport_scale[1] * vertex.y / w + ctx.viewport_offset[1];
+    vertex.z = ctx.viewport_scale[2] * vertex.z / w + ctx.viewport_offset[2];
 }
 
-static void screen_transform(std::vector<Vertex>& vertices) {
-    for (Vertex& vertex : vertices) {
-        vertex.x -= ctx.offset_x;
-        vertex.y -= ctx.offset_y;
-    }
+static void screen_transform(Vertex& vertex) {
+    vertex.x -= ctx.offset_x;
+    vertex.y -= ctx.offset_y;
 }
 
 // Blending/lighting helpers
@@ -1440,24 +1447,24 @@ static inline u8 color_multiply(const int src_color, const int dst_color) {
     return (src_color * dst_color) / 255;
 }
 
-static void calculate_lighting(std::vector<Vertex>& vertices) {
+static void calculate_lighting(Vertex& vertex) {
     auto& lighting = ctx.lighting;
 
-    for (Vertex& vertex : vertices) {
-        Color final_color, vertex_color{ .r = (u8)vertex.r, .g = (u8)vertex.g, .b = (u8)vertex.b, .a = (u8)vertex.a };
+    Color final_color, vertex_color{ .r = (u8)vertex.r, .g = (u8)vertex.g, .b = (u8)vertex.b, .a = (u8)vertex.a };
 
-        if (lighting.enable) {
-            // Set color to model emission color + global ambient
-            final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
-        } else {
-            final_color = vertex_color;
-        }
+    if (lighting.enable) {
+        // Set color to model emission color + global ambient
+        final_color = color_add(lighting.model_colors[ModelColor::MODEL_COLOR_EMISSION], color_multiply(lighting.model_colors[ModelColor::MODEL_COLOR_AMBIENT], lighting.ambient_color));
 
-        vertex.r = final_color.r;
-        vertex.g = final_color.g;
-        vertex.b = final_color.b;
-        vertex.a = final_color.a;
+        // The rest is a big TODO...
+    } else {
+        final_color = vertex_color;
     }
+
+    vertex.r = final_color.r;
+    vertex.g = final_color.g;
+    vertex.b = final_color.b;
+    vertex.a = final_color.a;
 }
 
 template<int size>
@@ -1692,45 +1699,123 @@ static f32 get_shade_intensity(
     return intensity;
 }
 
-static void get_shade_coords(std::vector<Vertex>& vertices) {
+static void get_shade_coords(Vertex& vertex) {
     const auto& u_light = ctx.lighting.light[ctx.u_light];
     const auto& v_light = ctx.lighting.light[ctx.v_light];
 
-    for (Vertex& vertex : vertices) {
-        const f32 nx = vertex.nx;
-        const f32 ny = vertex.ny;
-        const f32 nz = vertex.nz;
-        const f32 n_length = vec3_length(nx, ny, nz);
+    const f32 nx = vertex.nx;
+    const f32 ny = vertex.ny;
+    const f32 nz = vertex.nz;
+    const f32 n_length = vec3_length(nx, ny, nz);
 
-        const f32 pu = get_shade_intensity(u_light, nx, ny, nz, n_length);
-        const f32 pv = get_shade_intensity(v_light, nx, ny, nz, n_length);
+    const f32 pu = get_shade_intensity(u_light, nx, ny, nz, n_length);
+    const f32 pv = get_shade_intensity(v_light, nx, ny, nz, n_length);
 
-        vertex.s = (pu + 1) * 0.5;
-        vertex.t = (pv + 1) * 0.5;
-    }
+    vertex.s = (pu + 1) * 0.5;
+    vertex.t = (pv + 1) * 0.5;
 }
 
-static void transform_and_lighting(std::vector<Vertex>& vertices, const bool is_rectangle = false) {
-    const bool through_mode = ctx.vertex_type.through_mode;
+enum Outcode {
+    OUTCODE_LEFT   = 1 << 0,
+    OUTCODE_RIGHT  = 1 << 1,
+    OUTCODE_BOTTOM = 1 << 2,
+    OUTCODE_TOP    = 1 << 3,
+    OUTCODE_NEAR   = 1 << 4,
+};
 
-    // Rectangles always use display coordinates, so they do not experience this
-    if (!through_mode && !is_rectangle) {
-        // In normal mode, the GE performs a buuuunch of vertex transformations...
-        transform_3d(vertices, ge::get_world_matrix());
-        transform_3d(vertices, ge::get_view_matrix());
-        transform_4d(vertices, ge::get_perspective_matrix());
-        viewport_transform(vertices);
-        screen_transform(vertices);
+static inline u32 get_outcode(const Vertex& vertex) {
+    u32 outcode = 0;
 
-        calculate_lighting(vertices);
+    if (vertex.x < -vertex.w) {
+        outcode |= Outcode::OUTCODE_LEFT;
+    }
 
-        if (ctx.texture_mapping_mode == 2) {
-            get_shade_coords(vertices);
+    if (vertex.x > vertex.w) {
+        outcode |= Outcode::OUTCODE_RIGHT;
+    }
+
+    if (vertex.y < -vertex.w) {
+        outcode |= Outcode::OUTCODE_BOTTOM;
+    }
+
+    if (vertex.y > vertex.w) {
+        outcode |= Outcode::OUTCODE_TOP;
+    }
+
+    if (vertex.z < -vertex.w) {
+        outcode |= Outcode::OUTCODE_NEAR;
+    }
+
+    return outcode;
+}
+
+static void transform_geometry(std::vector<Vertex>& vertices) {
+    if (ctx.vertex_type.through_mode) {
+        return;
+    }
+
+    transform_3d(vertices, ge::get_world_matrix());
+    transform_3d(vertices, ge::get_view_matrix());
+
+    // End transforms here so we can perform near clipping in view space
+}
+
+static Vertex interpolate_vertex(const Vertex& a, const Vertex& b, const f32 t) {
+    Vertex vertex{};
+ 
+    vertex.x = a.x + t * (b.x - a.x);
+    vertex.y = a.y + t * (b.y - a.y);
+    vertex.z = a.z + t * (b.z - a.z);
+    vertex.w = a.w + t * (b.w - a.w);
+ 
+    vertex.has_texcoords = a.has_texcoords;
+
+    if (a.has_texcoords) {
+        vertex.s = a.s + t * (b.s - a.s);
+        vertex.t = a.t + t * (b.t - a.t);
+    }
+ 
+    vertex.has_colors = a.has_colors;
+
+    if (a.has_colors) {
+        vertex.r = a.r + t * (b.r - a.r);
+        vertex.g = a.g + t * (b.g - a.g);
+        vertex.b = a.b + t * (b.b - a.b);
+        vertex.a = a.a + t * (b.a - a.a);
+    }
+ 
+    vertex.has_normals = a.has_normals;
+
+    if (a.has_normals) {
+        vertex.nx = a.nx + t * (b.nx - a.nx);
+        vertex.ny = a.ny + t * (b.ny - a.ny);
+        vertex.nz = a.nz + t * (b.nz - a.nz);
+    }
+ 
+    return vertex;
+}
+
+static void near_clip_triangle(const Vertex& a, const Vertex& b, const Vertex& c, std::vector<Vertex>& out) {
+    const Vertex* in[3] = { &a, &b, &c };
+ 
+    for (int i = 0; i < 3; i++) {
+        const Vertex& curr = *in[i];
+        const Vertex& next = *in[(i + 1) % 3];
+ 
+        const f32 curr_d = curr.z + curr.w;
+        const f32 next_d = next.z + next.w;
+ 
+        if (curr_d >= 0.0F) {
+            out.push_back(curr);
+        }
+ 
+        if ((curr_d >= 0.0F) != (next_d >= 0.0F)) {
+            out.push_back(interpolate_vertex(curr, next, curr_d / (curr_d - next_d)));
         }
     }
 }
 
-static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_enable = false, const bool is_rectangle = false) {
+static std::vector<Vertex> fetch_vertices(const u32 count) {
     std::vector<Vertex> vertices(count);
 
     const bool morph_enable = !ctx.vertex_type.through_mode && (ctx.vertex_type.num_morph > 0);
@@ -1821,10 +1906,6 @@ static std::vector<Vertex> fetch_vertices(const u32 count, const bool transform_
 
     if (!ctx.vertex_type.through_mode && (ctx.vertex_type.weight_type != WeightType::WEIGHT_TYPE_NONE)) {
         transform_bone(vertices);
-    }
-
-    if (transform_enable) {
-        transform_and_lighting(vertices, is_rectangle);
     }
 
     return vertices;
@@ -2201,6 +2282,8 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
 
     Color final_color;
 
+    const bool use_tex_alpha = blend_params.use_tex_alpha && (ctx.texture_format != TexelFormat::TEXEL_FORMAT_RGB565);
+
     switch (blend_params.func) {
         case 0:
             // Modulate
@@ -2208,7 +2291,7 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             final_color.g = color_multiply(vertex_color.g, tex_color.g);
             final_color.b = color_multiply(vertex_color.b, tex_color.b);
 
-            if (blend_params.use_tex_alpha) {
+            if (use_tex_alpha) {
                 final_color.a = color_multiply(vertex_color.a, tex_color.a);
             } else {
                 final_color.a = vertex_color.a;
@@ -2216,7 +2299,7 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             break;
         case 1:
             // Decal
-            if (blend_params.use_tex_alpha) {
+            if (use_tex_alpha) {
                 final_color.r = color_add(color_multiply(255 - tex_color.a, vertex_color.r), color_multiply(tex_color.a, tex_color.r));
                 final_color.g = color_add(color_multiply(255 - tex_color.a, vertex_color.g), color_multiply(tex_color.a, tex_color.g));
                 final_color.b = color_add(color_multiply(255 - tex_color.a, vertex_color.b), color_multiply(tex_color.a, tex_color.b));
@@ -2233,7 +2316,12 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             final_color.r = color_add(color_multiply(255 - tex_color.r, vertex_color.r), color_multiply(tex_color.r, ctx.tex_env_color.r));
             final_color.g = color_add(color_multiply(255 - tex_color.g, vertex_color.g), color_multiply(tex_color.g, ctx.tex_env_color.g));
             final_color.b = color_add(color_multiply(255 - tex_color.b, vertex_color.b), color_multiply(tex_color.b, ctx.tex_env_color.b));
-            final_color.a = vertex_color.a;
+
+            if (use_tex_alpha) {
+                final_color.a = color_multiply(vertex_color.a, tex_color.a);
+            } else {
+                final_color.a = vertex_color.a;
+            }
             break;
         case 3:
             // Replace
@@ -2241,7 +2329,7 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
             final_color.g = tex_color.g;
             final_color.b = tex_color.b;
             
-            if (blend_params.use_tex_alpha) {
+            if (use_tex_alpha) {
                 final_color.a = tex_color.a;
             } else {
                 final_color.a = vertex_color.a;
@@ -2255,38 +2343,45 @@ static Color blend_texture(const Color vertex_color, const Color tex_color) {
     return final_color;
 }
 
+static inline int clamp_texcoord(const int coord, const int size, const bool clamp) {
+    if (clamp) {
+        return std::clamp<int>(coord, 0, size - 1);
+    }
+
+    return coord & (size - 1);
+}
+
+static inline Color interpolate_color(const Color a, const Color b, const f32 t) {
+    return Color {
+        .r = (u8)(a.r + (b.r - a.r) * t),
+        .g = (u8)(a.g + (b.g - a.g) * t),
+        .b = (u8)(a.b + (b.b - a.b) * t),
+        .a = (u8)(a.a + (b.a - a.a) * t),
+    };
+}
+
 static u32 tex_sample_bilinear(const f32 u, const f32 v) {
-    const int x0 = (int)u;
-    const int x1 = std::min(x0 + 1, (int)(ctx.texture[0].width - 1));
-    const int y0 = (int)v;
-    const int y1 = std::min(y0 + 1, (int)(ctx.texture[0].height - 1));
+    const int width  = ctx.texture[0].width;
+    const int height = ctx.texture[0].height;
+
+    const int x0 = (int)std::floor(u);
+    const int y0 = (int)std::floor(v);
+
+    const bool clamp_s = ctx.clamp_s;
+    const bool clamp_t = ctx.clamp_t;
+
+    const int xa = clamp_texcoord(x0,     width,  clamp_s);
+    const int xb = clamp_texcoord(x0 + 1, width,  clamp_s);
+    const int ya = clamp_texcoord(y0,     height, clamp_t);
+    const int yb = clamp_texcoord(y0 + 1, height, clamp_t);
 
     const f32 dx = u - x0;
     const f32 dy = v - y0;
+    
+    const Color top    = interpolate_color({ fetch_texel(xa, ya) }, { fetch_texel(xb, ya) }, dx);
+    const Color bottom = interpolate_color({ fetch_texel(xa, yb) }, { fetch_texel(xb, yb) }, dx);
 
-    Color colors[6] = {
-        { fetch_texel(x0, y0) }, { fetch_texel(x1, y0) },
-        { fetch_texel(x0, y1) }, { fetch_texel(x1, y1) },
-    };
-
-    // Blend top pixels
-    colors[4].r = color_clamp(colors[0].r * (1.0 - dx) + colors[1].r * dx);
-    colors[4].g = color_clamp(colors[0].g * (1.0 - dx) + colors[1].g * dx);
-    colors[4].b = color_clamp(colors[0].b * (1.0 - dx) + colors[1].b * dx);
-    colors[4].a = color_clamp(colors[0].a * (1.0 - dx) + colors[1].a * dx);
-
-    // Blend bottom pixels
-    colors[5].r = color_clamp(colors[2].r * (1.0 - dx) + colors[3].r * dx);
-    colors[5].g = color_clamp(colors[2].g * (1.0 - dx) + colors[3].g * dx);
-    colors[5].b = color_clamp(colors[2].b * (1.0 - dx) + colors[3].b * dx);
-    colors[5].a = color_clamp(colors[2].a * (1.0 - dx) + colors[3].a * dx);
-
-    return Color {
-        .r = color_clamp(colors[4].r * (1.0 - dy) + colors[5].r * dy),
-        .g = color_clamp(colors[4].g * (1.0 - dy) + colors[5].g * dy),
-        .b = color_clamp(colors[4].b * (1.0 - dy) + colors[5].b * dy),
-        .a = color_clamp(colors[4].a * (1.0 - dy) + colors[5].a * dy),
-    }.raw;
+    return interpolate_color(top, bottom, dy).raw;
 }
 
 static void draw_rectangle(const Vertex a, const Vertex b) {
@@ -2351,41 +2446,12 @@ static void draw_rectangle(const Vertex a, const Vertex b) {
                             exit(1);
                     }
 
-                    // TODO: implement wrapping
-                    // Clamp S
-                    if (s < 0.0) {
-                        s = 0.0;
-                    } else if (s > 1.0) {
-                        s = 1.0;
-                    }
-
-                    // Clamp T
-                    if (t < 0.0) {
-                        t = 0.0;
-                    } else if (t > 1.0) {
-                        t = 1.0;
-                    }
-
-                    u = s * (ctx.texture[0].width  - 1);
-                    v = t * (ctx.texture[0].height - 1);
+                    u = s * ctx.texture[0].width;
+                    v = t * ctx.texture[0].height;
                 } else {
                     // Maybe?
                     u = a.s + ds * (x - a.x);
                     v = a.t + dt * (y - a.y);
-
-                    // Clamp U
-                    if (u < 0.0) {
-                        u = 0.0;
-                    } else if (u >= ctx.texture[0].width) {
-                        u = ctx.texture[0].width - 1;
-                    }
-
-                    // Clamp V
-                    if (v < 0.0) {
-                        v = 0.0;
-                    } else if (v >= ctx.texture[0].height) {
-                        v = ctx.texture[0].height - 1;
-                    }
                 }
 
                 const Color tex_color { .raw = tex_sample_bilinear(u, v) };
@@ -2439,6 +2505,14 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
     const Color c_color = { .r = (u8)c.r, .g = (u8)c.g, .b = (u8)c.b, .a = (u8)c.a };
 
+    if (ctx.backface_culling_enable && !ctx.vertex_type.through_mode) {
+        const bool is_clockwise = edge_function(a, b, c) > 0.0;
+
+        if (is_clockwise == (ctx.cull_mode == 0)) {
+            return;
+        }
+    }
+
     if (edge_function(a, b, c) < 0.0) {
         std::swap(b, c);
     }
@@ -2458,7 +2532,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
 
     logger->trace("Bounding box: ({}, {}), ({}, {})", x_min, y_min, x_max, y_max);
 
-    if ((x_min >= x_max) || (y_min >= y_max)) {
+    if ((x_min > x_max) || (y_min > y_max)) {
         return;
     }
 
@@ -2472,7 +2546,7 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
             const f32 w2 = edge_function(a, b, p);
 
             if ((w0 >= 0.0) && (w1 >= 0.0) && (w2 >= 0.0)) {
-                const u16 z = (u16)interpolate(w0, w1, w2, a.z, b.z, c.z, area);
+                const u16 z = (u16)std::clamp<f32>(interpolate(w0, w1, w2, a.z, b.z, c.z, area), 0.0F, 65535.0F);
 
                 if (!depth_range_test(z)) {
                     continue;
@@ -2533,23 +2607,8 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
                                 exit(1);
                         }
 
-                        // TODO: implement wrapping
-                        // Clamp S
-                        if (s < 0.0) {
-                            s = 0.0;
-                        } else if (s > 1.0) {
-                            s = 1.0;
-                        }
-
-                        // Clamp T
-                        if (t < 0.0) {
-                            t = 0.0;
-                        } else if (t > 1.0) {
-                            t = 1.0;
-                        }
-
-                        u = s * (ctx.texture[0].width  - 1);
-                        v = t * (ctx.texture[0].height - 1);
+                        u = s * ctx.texture[0].width;
+                        v = t * ctx.texture[0].height;
                     } else {
                         u = interpolate(w0, w1, w2, a.s, b.s, c.s, area);
                         v = interpolate(w0, w1, w2, a.t, b.t, c.t, area);
@@ -2595,6 +2654,71 @@ static void draw_triangle(Vertex a, Vertex b, Vertex c) {
     }
 }
 
+static void transform_and_draw_triangle(Vertex a, Vertex b, Vertex c) {
+    for (Vertex* v : { &a, &b, &c }) {
+        viewport_transform(*v);
+
+        if (!((v->x >= 0.0F) && (v->x < 4096.0F) && (v->y >= 0.0F) && (v->y < 4096.0F))) {
+            return;
+        }
+
+        v->z = std::clamp(v->z, 0.0F, 65535.0F);
+
+        screen_transform(*v);
+        calculate_lighting(*v);
+
+        if (ctx.texture_mapping_mode == 2) {
+            get_shade_coords(*v);
+        }
+    }
+
+    draw_triangle(a, b, c);
+}
+
+static void clip_and_draw_triangle(const Vertex& a, const Vertex& b, const Vertex& c) {
+    if (ctx.vertex_type.through_mode) {
+        draw_triangle(a, b, c);
+        return;
+    }
+
+    Vertex tri[3] = { a, b, c };
+
+    for (Vertex& vertex : tri) {
+        transform_4d(vertex, ge::get_perspective_matrix());
+    }
+
+    const u32 outcodes[3] = { get_outcode(tri[0]), get_outcode(tri[1]), get_outcode(tri[2]) };
+
+    // All vertices outside one clipping surface
+    if ((outcodes[0] & outcodes[1] & outcodes[2]) != 0) {
+        return;
+    }
+ 
+    if (!ctx.clipping_enable) {
+        // This discards the whole triangle because it lies behind the viewpoint
+        if ((tri[0].w <= 0.0F) || (tri[1].w <= 0.0F) || (tri[2].w <= 0.0F)) {
+            return;
+        }
+ 
+        transform_and_draw_triangle(tri[0], tri[1], tri[2]);
+        return;
+    }
+
+    if (((outcodes[0] | outcodes[1] | outcodes[2]) & Outcode::OUTCODE_NEAR) == 0) {
+        // No need to clip here
+        transform_and_draw_triangle(tri[0], tri[1], tri[2]);
+        return;
+    }
+ 
+    std::vector<Vertex> clipped_vertices;
+
+    near_clip_triangle(a, b, c, clipped_vertices);
+ 
+    for (u32 i = 1; (i + 1) < clipped_vertices.size(); i++) {
+        transform_and_draw_triangle(clipped_vertices[0], clipped_vertices[i], clipped_vertices[i + 1]);
+    }
+}
+
 void draw_primitive(const u32 count, const u32 prim_type) {
     assert(prim_type <= PrimType::PRIM_TYPE_RECTANGLE);
 
@@ -2604,14 +2728,18 @@ void draw_primitive(const u32 count, const u32 prim_type) {
 
     const bool is_rectangle = prim_type == PrimType::PRIM_TYPE_RECTANGLE;
 
-    const std::vector<Vertex> vertices = fetch_vertices(count, true, is_rectangle);
+    std::vector<Vertex> vertices = fetch_vertices(count);
+
+    if (!ctx.vertex_type.through_mode && !is_rectangle) {
+        transform_geometry(vertices);
+    }
 
     switch (prim_type) {
         case PrimType::PRIM_TYPE_TRIANGLE: {
             assert((count % 3) == 0);
 
             for (u32 i = 0; i < count; i += 3) {
-                draw_triangle(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+                clip_and_draw_triangle(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
             }
             break;
         }
@@ -2619,7 +2747,12 @@ void draw_primitive(const u32 count, const u32 prim_type) {
             assert(count > 2);
 
             for (u32 i = 0; i < (count - 2); i++) {
-                draw_triangle(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+                // Keep winding order consistent so backface culling works correctly
+                if ((i & 1) == 0) {
+                    clip_and_draw_triangle(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+                } else {
+                    clip_and_draw_triangle(vertices[i + 1], vertices[i + 0], vertices[i + 2]);
+                }
             }
             break;
         }
@@ -2726,7 +2859,9 @@ static void draw_bezier_patch(
 
     // Now we can apply T&L, otherwise we might not have any surface normals
     // for lighting
-    transform_and_lighting(vertices, false);
+    if (!ctx.vertex_type.through_mode) {
+        transform_geometry(vertices);
+    }
 
     // Draw the patch mesh
     for (u32 v = 0; v < v_div; v++) {
@@ -2738,11 +2873,11 @@ static void draw_bezier_patch(
 
             // Not technically correct, but it'll remind me to properly implement this...
             if (!ctx.patch_control.is_ccw) {
-                draw_triangle(a, b, c);
-                draw_triangle(c, b, d);
+                clip_and_draw_triangle(a, b, c);
+                clip_and_draw_triangle(c, b, d);
             } else {
-                draw_triangle(a, c, b);
-                draw_triangle(c, d, b);
+                clip_and_draw_triangle(a, c, b);
+                clip_and_draw_triangle(c, d, b);
             }
         }
     }
@@ -2976,7 +3111,9 @@ static void draw_spline_patch(
 
     // Now we can apply T&L, otherwise we might not have any surface normals
     // for lighting
-    transform_and_lighting(vertices, false);
+    if (!ctx.vertex_type.through_mode) {
+        transform_geometry(vertices);
+    }
 
     // Draw the patch mesh
     for (u32 v = 0; v < v_div; v++) {
@@ -2989,11 +3126,11 @@ static void draw_spline_patch(
             // Not technically correct, but it'll remind me to properly implement this...
             // I think I need to traverse the loop backwards actually?
             if (!ctx.patch_control.is_ccw) {
-                draw_triangle(a, b, c);
-                draw_triangle(c, b, d);
+                clip_and_draw_triangle(a, b, c);
+                clip_and_draw_triangle(c, b, d);
             } else {
-                draw_triangle(a, c, b);
-                draw_triangle(c, d, b);
+                clip_and_draw_triangle(a, c, b);
+                clip_and_draw_triangle(c, d, b);
             }
         }
     }
