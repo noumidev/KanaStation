@@ -239,7 +239,7 @@ static void assert_rpc_interrupt(const int command) {
 
         bus::Bus* bus = kanacore::get_sc_bus_ptr();
 
-        bus->write<u32>(0x1FC00628, -1);
+        bus->write<u32>(0x1FC00628, 0);
     } else {
         intc::assert_me_interrupt(31);
     }
