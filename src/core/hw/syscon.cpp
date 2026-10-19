@@ -44,6 +44,12 @@ constexpr u32 POMMEL_VERSIONS[] = {
     0x123, // TA-088v1/2
 };
 
+constexpr u32 POLESTAR_VERSIONS[] = {
+    // I don't know which values are possible here, but I've seen 0x106
+    0x106,
+    0x106,
+};
+
 // These values were taken from one of my PSPs
 constexpr static u8 INITIAL_SCRATCHPAD[SCRATCHPAD_SIZE] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -74,12 +80,14 @@ enum SysconCommand {
     SYSCON_COMMAND_CTRL_ANALOG_XY_POLLING        = 0x33,
     SYSCON_COMMAND_CTRL_HR_POWER                 = 0x34,
     SYSCON_COMMAND_GET_POMMEL_VERSION            = 0x40,
+    SYSCON_COMMAND_GET_POLESTAR_VERSION          = 0x41,
     SYSCON_COMMAND_CTRL_VOLTAGE                  = 0x42,
     SYSCON_COMMAND_CTRL_POWER                    = 0x45,
     SYSCON_COMMAND_GET_POWER_STATUS              = 0x46,
     SYSCON_COMMAND_CTRL_LED                      = 0x47,
     SYSCON_COMMAND_CTRL_LEPTON_POWER             = 0x4B,
     SYSCON_COMMAND_CTRL_MS_POWER                 = 0x4C,
+    SYSCON_COMMAND_CTRL_WLAN_POWER               = 0x4D,
 };
 
 enum BufferIndex {
@@ -104,6 +112,7 @@ static struct {
 
     u32 baryon_version;
     u32 pommel_version;
+    u32 polestar_version;
     const char* baryon_timestamp;
 
     bool service_mode;
@@ -238,6 +247,11 @@ static void common_read(const u8 command) {
             
             data = ctx.pommel_version;
             break;
+        case SysconCommand::SYSCON_COMMAND_GET_POLESTAR_VERSION:
+            logger->debug("GET_POLESTAR_VERSION");
+            
+            data = ctx.polestar_version;
+            break;
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             logger->debug("GET_POWER_STATUS");
 
@@ -311,6 +325,9 @@ static void common_write(const u8 command) {
         case SysconCommand::SYSCON_COMMAND_CTRL_MS_POWER:
             logger->debug("CTRL_MS_POWER: {}", data);
             break;
+        case SysconCommand::SYSCON_COMMAND_CTRL_WLAN_POWER:
+            logger->debug("CTRL_WLAN_POWER: {}", data);
+            break;
         default:
             logger->error("Unhandled common write for command {:02X}", command);
             exit(1);
@@ -358,11 +375,11 @@ static void command_get_status2() {
 
 static void command_read_scratchpad() {
     const u8 idx  = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] >> 2;
-    const u8 size = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3;
+    const u8 size = 1 << (receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3);
 
     logger->debug("READ_SCRATCHPAD (idx: {}, size: {})", idx, size);
 
-    assert((idx + size) < SCRATCHPAD_SIZE);
+    assert((idx + size) <= SCRATCHPAD_SIZE);
 
     write_transmit_data(&ctx.scratchpad[idx], size);
 }
@@ -422,11 +439,11 @@ static void command_tachyon_handshake() {
 
 static void command_write_scratchpad() {
     const u8 idx  = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] >> 2;
-    const u8 size = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3;
+    const u8 size = 1 << (receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA] & 3);
 
     logger->debug("WRITE_SCRATCHPAD (idx: {}, size: {})", idx, size);
 
-    assert((idx + size) < SCRATCHPAD_SIZE);
+    assert((idx + size) <= SCRATCHPAD_SIZE);
 
     for (u8 i = 0; i < size; i++) {
         ctx.scratchpad[idx + i] = receive_buffer.buf[BUFFER_INDEX_RECEIVE_DATA + i];
@@ -483,6 +500,7 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_CTRL_LED:
         case SysconCommand::SYSCON_COMMAND_CTRL_LEPTON_POWER:
         case SysconCommand::SYSCON_COMMAND_CTRL_MS_POWER:
+        case SysconCommand::SYSCON_COMMAND_CTRL_WLAN_POWER:
             common_write(command);
             break;
         case SysconCommand::SYSCON_COMMAND_GET_TACHYON_TEMP:
@@ -493,6 +511,7 @@ static void start_command() {
         case SysconCommand::SYSCON_COMMAND_GET_POWER_SUPPLY_STATUS:
         case SysconCommand::SYSCON_COMMAND_GET_WAKE_UP_FACTOR:
         case SysconCommand::SYSCON_COMMAND_GET_POMMEL_VERSION:
+        case SysconCommand::SYSCON_COMMAND_GET_POLESTAR_VERSION:
         case SysconCommand::SYSCON_COMMAND_GET_POWER_STATUS:
             common_read(command);
             break;
@@ -526,6 +545,7 @@ void initialize(const Configuration config) {
 
     ctx.baryon_version = BARYON_VERSIONS[config.mobo_type];
     ctx.pommel_version = POMMEL_VERSIONS[config.mobo_type];
+    ctx.polestar_version = POLESTAR_VERSIONS[config.mobo_type];
     ctx.baryon_timestamp = BARYON_TIMESTAMPS[config.mobo_type];
 
     ctx.service_mode = config.service_mode;
