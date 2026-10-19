@@ -50,8 +50,8 @@ static const std::unordered_map<SDL_Scancode, kanacore::Button> key_bindings = {
     { SDL_SCANCODE_Z, kanacore::Button::BUTTON_HOME     },
     { SDL_SCANCODE_N, kanacore::Button::BUTTON_HOLD     },
     { SDL_SCANCODE_M, kanacore::Button::BUTTON_WLAN_SW  },
-    { SDL_SCANCODE_X, kanacore::Button::BUTTON_VOL_UP   },
-    { SDL_SCANCODE_C, kanacore::Button::BUTTON_VOL_DOWN },
+    { SDL_SCANCODE_C, kanacore::Button::BUTTON_VOL_UP   },
+    { SDL_SCANCODE_X, kanacore::Button::BUTTON_VOL_DOWN },
     { SDL_SCANCODE_V, kanacore::Button::BUTTON_SCREEN   },
     { SDL_SCANCODE_B, kanacore::Button::BUTTON_NOTE     },
 };
