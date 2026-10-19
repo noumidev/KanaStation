@@ -186,6 +186,7 @@ constexpr u8 AES_KEYSTORE[AES_KEYSTORE_SIZE][AES_KEY_SIZE] = {
 };
 
 enum IoAddress {
+    IO_ADDRESS_VERSION = KIRK_ADDR + 0x004,
     IO_ADDRESS_PHASE   = KIRK_ADDR + 0x00C,
     IO_ADDRESS_COMMAND = KIRK_ADDR + 0x010,
     IO_ADDRESS_RESULT  = KIRK_ADDR + 0x014,
@@ -1004,6 +1005,12 @@ static void start_first_phase() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_VERSION: {
+            constexpr u32 VERSION = 0x30303130;
+
+            logger->debug("VERSION read32");
+            return VERSION;
+        }
         case IoAddress::IO_ADDRESS_PHASE:
             logger->debug("PHASE read32");
             return HW_KIRK_PHASE.raw;

@@ -37,6 +37,7 @@ constexpr int SPOCK_INTERRUPT = 6;
 constexpr u64 NUM_TRANS_REGS = 10;
 
 enum IoAddress {
+    IO_ADDRESS_VERSION  = SPOCK_ADDR + 0x004,
     IO_ADDRESS_RESET    = SPOCK_ADDR + 0x008,
     IO_ADDRESS_COMMAND  = SPOCK_ADDR + 0x010,
     IO_ADDRESS_DRVMODE  = SPOCK_ADDR + 0x018,
@@ -393,6 +394,12 @@ static void start_command() {
 
 static u32 read(const u32 addr) {
     switch (addr) {
+        case IoAddress::IO_ADDRESS_VERSION: {
+            constexpr u32 VERSION = 0x30303530;
+
+            logger->debug("VERSION read32");
+            return VERSION;
+        }
         case IoAddress::IO_ADDRESS_RESET:
             logger->debug("RESET read32");
             return HW_SPOCK_RESET;
