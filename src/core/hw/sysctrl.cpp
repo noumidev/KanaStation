@@ -47,6 +47,7 @@ enum IoAddress {
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
     IO_ADDRESS_RAMSIZE    = SYSCTRL_ADDR + 0x040,
     IO_ADDRESS_POSTME     = SYSCTRL_ADDR + 0x044,
+    IO_ADDRESS_MESEMA     = SYSCTRL_ADDR + 0x048,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
@@ -68,6 +69,7 @@ enum IoAddress {
 #define HW_SYSCTRL_NMIEN      ctx.nmi.enable
 #define HW_SYSCTRL_NMIFLAGS   ctx.nmi.flags
 #define HW_SYSCTRL_RAMSIZE    ctx.ram_size
+#define HW_SYSCTRL_MESEMA     ctx.me_semaphore
 #define HW_SYSCTRL_RESETEN    ctx.reset_enable
 #define HW_SYSCTRL_BUSCLKEN   ctx.busclock_enable
 #define HW_SYSCTRL_CLOCKEN_LO ctx.clock_enable[0]
@@ -101,6 +103,7 @@ static struct {
     } nmi;
 
     u32 ram_size;
+    u32 me_semaphore;
     u32 reset_enable;
     u32 busclock_enable;
     u32 clock_enable[2];
@@ -140,6 +143,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_RAMSIZE:
             logger->debug("RAMSIZE read32");
             return HW_SYSCTRL_RAMSIZE;
+        case IoAddress::IO_ADDRESS_MESEMA:
+            logger->debug("MESEMA read32");
+            return HW_SYSCTRL_MESEMA;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN read32");
             return HW_SYSCTRL_RESETEN;
@@ -287,6 +293,11 @@ static void write(const u32 addr, const u32 data) {
             }
             break;
         }
+        case IoAddress::IO_ADDRESS_MESEMA:
+            logger->debug("MESEMA write32 = {:08X}", data);
+
+            HW_SYSCTRL_MESEMA = (HW_SYSCTRL_MESEMA & ~1) | (data & 1);
+            break;
         case IoAddress::IO_ADDRESS_RESETEN:
             logger->debug("RESETEN write32 = {:08X}", data);
             write_reset_enable(data);
@@ -422,6 +433,14 @@ void set_ms0_connected() {
 
 void clear_ms0_connected() {
     HW_SYSCTRL_CONNSTAT &= ~0x100;
+}
+
+u32 get_me_semaphore() {
+    return HW_SYSCTRL_MESEMA;
+}
+
+void set_me_semaphore(const u32 data) {
+    HW_SYSCTRL_MESEMA = (HW_SYSCTRL_MESEMA & ~2) | (data & 2);
 }
 
 };

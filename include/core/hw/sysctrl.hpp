@@ -24,4 +24,7 @@ common::u64 get_fuseid();
 void set_ms0_connected();
 void clear_ms0_connected();
 
+common::u32 get_me_semaphore();
+void set_me_semaphore(const common::u32 data);
+
 };

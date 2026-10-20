@@ -19,6 +19,7 @@
 #include <core/kanacore.hpp>
 #include <core/hw/bus.hpp>
 #include <core/hw/intc.hpp>
+#include <core/hw/sysctrl.hpp>
 
 namespace kanacore::hw::me::sysctrl {
 
@@ -37,6 +38,7 @@ enum IoAddress {
     IO_ADDRESS_NMIFLAGS   = SYSCTRL_ADDR + 0x004,
     IO_ADDRESS_RAMSIZE    = SYSCTRL_ADDR + 0x040,
     IO_ADDRESS_POSTSC     = SYSCTRL_ADDR + 0x044,
+    IO_ADDRESS_MESEMA     = SYSCTRL_ADDR + 0x048,
     IO_ADDRESS_RESETEN    = SYSCTRL_ADDR + 0x04C,
     IO_ADDRESS_BUSCLKEN   = SYSCTRL_ADDR + 0x050,
     IO_ADDRESS_CLOCKEN_LO = SYSCTRL_ADDR + 0x054,
@@ -74,6 +76,9 @@ static u32 read(const u32 addr) {
         case IoAddress::IO_ADDRESS_RAMSIZE:
             logger->debug("RAMSIZE read32");
             return HW_SYSCTRL_RAMSIZE;
+        case IoAddress::IO_ADDRESS_MESEMA:
+            logger->debug("MESEMA read32");
+            return hw::sysctrl::get_me_semaphore();
         case IoAddress::IO_ADDRESS_BUSCLKEN:
             logger->debug("BUSCLKEN read32");
             return HW_SYSCTRL_BUSCLKEN;
@@ -110,6 +115,10 @@ static void write(const u32 addr, const u32 data) {
             if ((data & 1) != 0) {
                 intc::assert_sc_interrupt(31);
             }
+            break;
+        case IoAddress::IO_ADDRESS_MESEMA:
+            logger->debug("MESEMA write32 = {:08X}", data);
+            hw::sysctrl::set_me_semaphore(data);
             break;
         case IoAddress::IO_ADDRESS_BUSCLKEN:
             logger->debug("BUSCLKEN write32 = {:08X}", data);
