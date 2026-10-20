@@ -291,6 +291,10 @@ static inline i16 interpolate(const i16 a, const i16 b, const i64 t) {
 }
 
 static StereoSample sample_channel(const Channel& chan, const i64 timestamp) {
+    if (chan.period == 0) {
+        return { 0, 0 };
+    }
+
     const i64 t = std::clamp<i64>(((timestamp - chan.curr_timestamp) << 16) / chan.period, 0, 0x10000);
 
     return {
